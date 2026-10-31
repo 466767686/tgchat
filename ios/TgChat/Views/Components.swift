@@ -86,6 +86,10 @@ struct MessageBubbleView: View {
     /// Measured so the bubble hugs short text instead of being stretched by
     /// flexible SwiftUI layout (the footer's Spacer used to claim full width).
     private var textWidth: CGFloat {
+        let cacheKey = "w:\(message.deleted ? "d" : "t"):\(message.replyTo != nil ? 1 : 0):\(message.forwardedFrom != nil ? 1 : 0):\(message.text)"
+        if let cached = TextFormatCache.cachedWidth(key: cacheKey) {
+            return cached
+        }
         let plain = message.text.isEmpty ? " " : message.text
         let font = UIFont.systemFont(ofSize: 16)
         let rect = (plain as NSString).boundingRect(
@@ -98,7 +102,9 @@ struct MessageBubbleView: View {
         if message.replyTo != nil { width = max(width, 190) }
         if message.forwardedFrom != nil { width = max(width, 150) }
         let minimum: CGFloat = message.replyTo == nil ? 120 : 190
-        return max(minimum, min(264, width))
+        let result = max(minimum, min(264, width))
+        TextFormatCache.storeWidth(key: cacheKey, value: result)
+        return result
     }
 
     var body: some View {

@@ -299,13 +299,26 @@ struct FileAttachmentRow: View {
 struct ImageViewerSheet: View {
     let media: Media
     let token: String?
+
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drag: CGSize = .zero
+
+    private var progress: CGFloat {
+        min(1, max(0, abs(drag.height) / 260))
+    }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.black
+                .opacity(0.94 - 0.5 * progress)
+                .ignoresSafeArea()
+
             RemoteImageView(url: APIClient.shared.mediaURL(media.url), token: token, contentMode: .fit)
                 .ignoresSafeArea()
+                .scaleEffect(reduceMotion ? 1 : max(0.72, 1 - progress * 0.28))
+                .offset(drag)
+
             VStack {
                 HStack {
                     Spacer()
@@ -316,6 +329,7 @@ struct ImageViewerSheet: View {
                             .font(.system(size: 28))
                             .foregroundColor(.white.opacity(0.85))
                     }
+                    .buttonStyle(MotionIconPressStyle())
                     .padding()
                 }
                 Spacer()
@@ -327,6 +341,25 @@ struct ImageViewerSheet: View {
                 }
             }
         }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    drag = value.translation
+                }
+                .onEnded { value in
+                    let shouldDismiss = value.translation.height > 110 ||
+                        value.predictedEndTranslation.height > 280
+                    if shouldDismiss {
+                        Haptics.tap()
+                        dismiss()
+                    } else {
+                        withAnimation(Motion.animation(Motion.standard, reduceMotion: reduceMotion)) {
+                            drag = .zero
+                        }
+                    }
+                }
+        )
     }
 }
 

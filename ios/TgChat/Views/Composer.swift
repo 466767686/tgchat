@@ -31,6 +31,7 @@ struct ChatComposer: View {
 
     @EnvironmentObject private var app: AppState
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var showAttachMenu = false
     @State private var showPhotoPicker = false
@@ -73,6 +74,7 @@ struct ChatComposer: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
                 .background(c.surfaceAlt)
+                .transition(.motionSlide(reduceMotion: reduceMotion, edge: .bottom, distance: 10))
             } else if let reply = replyTarget {
                 HStack(spacing: 10) {
                     Image(systemName: "arrowshape.turn.up.left.fill")
@@ -97,6 +99,7 @@ struct ChatComposer: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
                 .background(c.surfaceAlt)
+                .transition(.motionSlide(reduceMotion: reduceMotion, edge: .bottom, distance: 10))
             }
 
             if let progress = app.uploadProgress {
@@ -146,7 +149,7 @@ struct ChatComposer: View {
                     }
                 )
                 .environmentObject(app)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.motionSlide(reduceMotion: reduceMotion, edge: .bottom, distance: 24))
             }
 
             if recorder.isRecording {
@@ -240,7 +243,7 @@ struct ChatComposer: View {
 
                     if draft.trimmingCharacters(in: .whitespaces).isEmpty {
                         Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                            withAnimation(Motion.animation(Motion.quick, reduceMotion: reduceMotion)) {
                                 showPanel = false
                             }
                             recorder.start()
@@ -251,6 +254,7 @@ struct ChatComposer: View {
                                 .frame(width: 42, height: 42)
                                 .background(Circle().fill(c.accent))
                         }
+                        .buttonStyle(MotionPressStyle(scale: 0.92))
                         .disabled(app.uploadProgress != nil)
                     } else {
                         Button {
@@ -278,6 +282,7 @@ struct ChatComposer: View {
                                 .frame(width: 42, height: 42)
                                 .background(Circle().fill(c.accent))
                         }
+                        .buttonStyle(MotionPressStyle(scale: 0.92))
                         .disabled(app.uploadProgress != nil)
                     }
                 }
@@ -286,6 +291,8 @@ struct ChatComposer: View {
                 .background(c.header)
             }
         }
+        .animation(Motion.animation(Motion.quick, reduceMotion: reduceMotion), value: replyTarget?.seq)
+        .animation(Motion.animation(Motion.quick, reduceMotion: reduceMotion), value: editing?.seq)
         .confirmationDialog("发送", isPresented: $showAttachMenu, titleVisibility: .hidden) {
             Button("照片或视频") { showPhotoPicker = true }
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -334,7 +341,7 @@ struct ChatComposer: View {
     }
 
     private func togglePanel(_ tab: Int) {
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+        withAnimation(Motion.animation(Motion.standard, reduceMotion: reduceMotion)) {
             if showPanel && panelTab == tab {
                 showPanel = false
             } else {

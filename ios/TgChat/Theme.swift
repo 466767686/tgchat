@@ -34,10 +34,28 @@ struct TgColors {
     var dateChip: Color { Color.black.opacity(0.45) }
 }
 
+private enum TimeFormatters {
+    static let time: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    static let listDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd.MM.yy"
+        return formatter
+    }()
+
+    static let headerDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M月d日"
+        return formatter
+    }()
+}
+
 func formatTime(_ millis: Int64) -> String {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "HH:mm"
-    return formatter.string(from: Date(timeIntervalSince1970: Double(millis) / 1000))
+    TimeFormatters.time.string(from: Date(timeIntervalSince1970: Double(millis) / 1000))
 }
 
 func formatListTime(_ millis: Int64) -> String {
@@ -50,9 +68,7 @@ func formatListTime(_ millis: Int64) -> String {
     if calendar.isDateInYesterday(date) {
         return "昨天"
     }
-    let formatter = DateFormatter()
-    formatter.dateFormat = "dd.MM.yy"
-    return formatter.string(from: date)
+    return TimeFormatters.listDay.string(from: date)
 }
 
 func formatDateHeader(_ millis: Int64) -> String {
@@ -60,12 +76,19 @@ func formatDateHeader(_ millis: Int64) -> String {
     let calendar = Calendar.current
     if calendar.isDateInToday(date) { return "今天" }
     if calendar.isDateInYesterday(date) { return "昨天" }
-    let formatter = DateFormatter()
-    formatter.dateFormat = "M月d日"
-    return formatter.string(from: date)
+    return TimeFormatters.headerDay.string(from: date)
 }
 
 func formattedText(_ text: String) -> AttributedString {
+    if let cached = TextFormatCache.cached(text) {
+        return cached
+    }
+    let result = buildFormattedText(text)
+    TextFormatCache.store(text, result)
+    return result
+}
+
+private func buildFormattedText(_ text: String) -> AttributedString {
     var attributed = (try? AttributedString(
         markdown: text,
         options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)

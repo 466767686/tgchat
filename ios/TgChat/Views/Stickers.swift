@@ -160,6 +160,8 @@ enum EmojiCatalog {
 struct StickerPanel: View {
     @EnvironmentObject private var app: AppState
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var tabNS
     let chatId: String
     @Binding var tab: Int
     var onEmoji: (String) -> Void
@@ -232,7 +234,8 @@ struct StickerPanel: View {
 
     private func tabButton(title: String, index: Int, colors c: TgColors) -> some View {
         Button {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+            Haptics.selection()
+            withAnimation(Motion.animation(Motion.standard, reduceMotion: reduceMotion)) {
                 tab = index
             }
         } label: {
@@ -241,9 +244,17 @@ struct StickerPanel: View {
                 .foregroundColor(tab == index ? .white : c.textSecondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
-                .background(Capsule().fill(tab == index ? c.accent : Color.clear))
+                .background {
+                    if tab == index && !reduceMotion {
+                        Capsule()
+                            .fill(c.accent)
+                            .matchedGeometryEffect(id: "stickerTab", in: tabNS)
+                    } else if tab == index {
+                        Capsule().fill(c.accent)
+                    }
+                }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MotionPressStyle(scale: 0.94))
     }
 
     private func emojiPanel(_ c: TgColors) -> some View {
@@ -286,7 +297,7 @@ struct StickerPanel: View {
                                 .frame(height: 38)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(MotionPressStyle(scale: 0.86))
                     }
                 }
                 .padding(.horizontal, 8)
@@ -338,7 +349,7 @@ struct StickerPanel: View {
                                     size: 72
                                 )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(MotionPressStyle(scale: 0.92))
                         }
                     }
                     .padding(10)
@@ -359,7 +370,7 @@ struct StickerPanel: View {
                                         .fill(item.id == pack.id ? c.accent.opacity(0.18) : Color.clear)
                                 )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(MotionPressStyle(scale: 0.9))
                             .onLongPressGesture { packToDelete = item }
                         }
                         Button { showImport = true } label: {

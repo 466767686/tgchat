@@ -402,6 +402,7 @@ struct GroupInfoView: View {
             }
         }
         .listRowBackground(c.background)
+        .buttonStyle(MotionPressStyle(scale: 0.99))
     }
 
     private func memberRow(_ member: User, chat: Chat, colors c: TgColors) -> some View {

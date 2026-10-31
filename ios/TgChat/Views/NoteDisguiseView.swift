@@ -436,6 +436,7 @@ struct LockPadView: View {
     @State private var input = ""
     @State private var error = false
     @State private var shake: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let accent = Color(hex: "#FF7FAE")
     private let deep = Color(hex: "#5C4A56")
@@ -540,11 +541,13 @@ struct LockPadView: View {
             } else {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 error = true
-                withAnimation(.spring(response: 0.2, dampingFraction: 0.35)) {
-                    shake = 10
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) { shake = -8 }
+                if !reduceMotion {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.35)) {
+                        shake = 10
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) { shake = -8 }
+                    }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
                     withAnimation(.easeOut(duration: 0.15)) { shake = 0 }

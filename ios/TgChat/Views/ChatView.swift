@@ -6,6 +6,7 @@ struct ChatView: View {
 
     @EnvironmentObject private var app: AppState
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft = ""
@@ -98,6 +99,7 @@ struct ChatView: View {
             }
         }
         .background(c.background.ignoresSafeArea())
+        .animation(Motion.animation(Motion.standard, reduceMotion: reduceMotion), value: selectionMode)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $viewingImage) {
             ImageViewerSheet(media: $0, token: app.token)
@@ -206,6 +208,7 @@ struct ChatView: View {
                     .foregroundColor(c.textSecondary)
                     .frame(width: 32, height: 32)
             }
+            .buttonStyle(MotionIconPressStyle())
 
             Button {
                 if liveChat.isGroup || liveChat.isChannel { showGroupInfo = true }
@@ -228,7 +231,7 @@ struct ChatView: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MotionPressStyle(scale: 0.97))
 
             Spacer()
 
@@ -269,6 +272,7 @@ struct ChatView: View {
                     .foregroundColor(c.textSecondary)
                     .frame(width: 34, height: 34)
             }
+            .buttonStyle(MotionIconPressStyle())
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
@@ -382,20 +386,25 @@ struct ChatView: View {
                             ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
                                 messageRow(index: index, message: message, colors: c)
                                     .id(message.seq)
+                                    .transition(.motionMessage(reduceMotion: reduceMotion))
                             }
                         }
                         .padding(.vertical, 8)
+                        .animation(
+                            Motion.animation(Motion.standard, reduceMotion: reduceMotion),
+                            value: messages.last?.seq
+                        )
                     }
                     .onChange(of: messages.last?.id) { _ in
                         if let last = messages.last {
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(reduceMotion ? nil : Motion.standard) {
                                 proxy.scrollTo(last.seq, anchor: .bottom)
                             }
                         }
                     }
                     .onChange(of: jumpToSeq) { seq in
                         guard let seq = seq else { return }
-                        withAnimation {
+                        withAnimation(reduceMotion ? nil : Motion.gentle) {
                             proxy.scrollTo(seq, anchor: .center)
                         }
                         jumpToSeq = nil
@@ -502,7 +511,7 @@ struct ChatView: View {
                         .padding(.vertical, 3)
                         .background(Capsule().fill(reaction.me ? c.accent.opacity(0.18) : c.surfaceAlt))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MotionPressStyle(scale: 0.9))
             }
             Spacer()
         }
@@ -591,8 +600,11 @@ struct ChatView: View {
         }
 
         Button {
-            selectionMode = true
-            selected = [message.seq]
+            Haptics.selection()
+            withAnimation(Motion.animation(Motion.standard, reduceMotion: reduceMotion)) {
+                selectionMode = true
+                selected = [message.seq]
+            }
         } label: {
             Label("多选", systemImage: "checkmark.circle")
         }
@@ -618,6 +630,7 @@ struct ChatView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(c.header)
+        .transition(.opacity)
     }
 
     private func selectionBar(_ c: TgColors) -> some View {
@@ -669,6 +682,7 @@ struct ChatView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 10)
         .background(c.header)
+        .transition(.opacity)
     }
 
     private func toggleSelection(_ message: Message) {

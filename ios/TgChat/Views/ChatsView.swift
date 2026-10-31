@@ -3,6 +3,8 @@ import SwiftUI
 struct ChatsView: View {
     @EnvironmentObject private var app: AppState
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var folderNS
 
     @State private var path = NavigationPath()
     @State private var showNewChat = false
@@ -134,7 +136,7 @@ struct ChatsView: View {
         NavigationLink(value: chat) {
             ChatRowView(chat: chat, myId: app.me?.id, colors: c)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MotionPressStyle(scale: 0.985))
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 Task { await app.batchChats("delete", chatIds: [chat.id]) }
@@ -233,15 +235,28 @@ struct ChatsView: View {
     }
 
     private func folderChip(title: String, active: Bool, colors c: TgColors, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            Haptics.selection()
+            withAnimation(Motion.animation(Motion.layout, reduceMotion: reduceMotion)) {
+                action()
+            }
+        } label: {
             Text(title)
                 .font(.system(size: 12, weight: active ? .semibold : .regular))
                 .foregroundColor(active ? .white : c.textSecondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
-                .background(Capsule().fill(active ? c.accent : c.surfaceAlt))
+                .background {
+                    if active && !reduceMotion {
+                        Capsule()
+                            .fill(c.accent)
+                            .matchedGeometryEffect(id: "folderPill", in: folderNS)
+                    } else {
+                        Capsule().fill(active ? c.accent : c.surfaceAlt)
+                    }
+                }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MotionPressStyle(scale: 0.94))
     }
 
     private func header(_ c: TgColors) -> some View {
