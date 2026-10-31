@@ -149,7 +149,8 @@ enum TextFormatCache {
     }
 
     static func cachedWidth(key: String) -> CGFloat? {
-        widthCache.object(forKey: key as NSString)?.doubleValue
+        guard let number = widthCache.object(forKey: key as NSString) else { return nil }
+        return CGFloat(number.doubleValue)
     }
 
     static func storeWidth(key: String, value: CGFloat) {

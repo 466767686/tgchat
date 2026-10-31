@@ -353,8 +353,10 @@ struct ImageViewerSheet: View {
                     if shouldDismiss {
                         Haptics.tap()
                         dismiss()
+                    } else if reduceMotion {
+                        drag = .zero
                     } else {
-                        withAnimation(Motion.animation(Motion.standard, reduceMotion: reduceMotion)) {
+                        withAnimation(Motion.standard) {
                             drag = .zero
                         }
                     }

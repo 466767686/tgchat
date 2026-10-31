@@ -258,6 +258,7 @@ struct ChatComposer: View {
                         .disabled(app.uploadProgress != nil)
                     } else {
                         Button {
+                            Haptics.tap()
                             let text = draft
                             draft = ""
                             if let editing = editing {
