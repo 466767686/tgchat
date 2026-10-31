@@ -44,6 +44,24 @@ CREATE TABLE IF NOT EXISTS messages (
   sender_id  TEXT NOT NULL,
   text       TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  client_id  TEXT
+  client_id  TEXT,
+  media_id   TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(media_id);
+
+CREATE TABLE IF NOT EXISTS media (
+  id          TEXT PRIMARY KEY,
+  chat_id     TEXT NOT NULL,
+  uploader_id TEXT NOT NULL,
+  kind        TEXT NOT NULL,            -- image | video | file | voice | sticker | gif
+  mime        TEXT NOT NULL,
+  size        INTEGER NOT NULL,
+  file_name   TEXT,
+  width       INTEGER,
+  height      INTEGER,
+  duration_ms INTEGER,
+  object_key  TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_chat ON media(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_seq ON messages(chat_id, seq);

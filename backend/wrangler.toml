@@ -23,6 +23,10 @@ database_id = "66bd610a-f6ed-4189-8812-08d441a487e4"
 name = "CHAT_HUB"
 class_name = "ChatHub"
 
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "tgchat-media"
+
 [[durable_objects.bindings]]
 name = "USER_HUB"
 class_name = "UserHub"

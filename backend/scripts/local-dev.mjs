@@ -91,6 +91,55 @@ const CHAT_HUB = {
   }),
 };
 
+// ------------------------------------------------------------------- media R2
+const mediaStore = new Map();
+const MEDIA = {
+  put: async (key, value, opts = {}) => {
+    const buf =
+      typeof value?.getReader === "function" || value instanceof ReadableStream
+        ? Buffer.from(await new Response(value).arrayBuffer())
+        : Buffer.from(value);
+    mediaStore.set(key, { buf, contentType: opts.httpMetadata?.contentType ?? "application/octet-stream" });
+    return { key, size: buf.length };
+  },
+  get: async (key, opts = {}) => {
+    const item = mediaStore.get(key);
+    if (!item) return null;
+    const total = item.buf.length;
+    let start = 0;
+    let end = total - 1;
+    const rangeHeader = opts.range?.get?.("range");
+    if (rangeHeader) {
+      const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader);
+      if (match) {
+        start = match[1] ? parseInt(match[1], 10) : 0;
+        end = match[2] ? parseInt(match[2], 10) : total - 1;
+        start = Math.max(0, Math.min(start, total - 1));
+        end = Math.min(end, total - 1);
+      }
+    }
+    const slice = item.buf.subarray(start, end + 1);
+    const partial = start > 0 || end < total - 1;
+    return {
+      body: new Response(slice).body,
+      size: total,
+      range: partial ? { offset: start, length: slice.length } : undefined,
+      httpMetadata: { contentType: item.contentType },
+    };
+  },
+};
+
+const USER_HUB = {
+  idFromName: (name) => ({ name }),
+  get: (id) => ({
+    fetch: async (input) => {
+      const url = String(input);
+      if (url.endsWith("/broadcast")) events.push({ user: id.name, event: "user-broadcast" });
+      return new Response("ok");
+    },
+  }),
+};
+
 // ------------------------------------------------------------------ seeding
 function seedAdmin() {
   const username = process.env.ADMIN_USERNAME ?? "admin";
@@ -130,7 +179,7 @@ const ctx = {
   },
   passThroughOnException: () => undefined,
 };
-const env = { DB, CHAT_HUB, SESSION_TTL_DAYS: "30", PBKDF2_ITERATIONS: "100000" };
+const env = { DB, CHAT_HUB, USER_HUB, MEDIA, SESSION_TTL_DAYS: "30", PBKDF2_ITERATIONS: "100000" };
 
 // ------------------------------------------------------------------- server
 const server = http.createServer(async (req, res) => {

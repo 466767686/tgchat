@@ -29,6 +29,29 @@ struct User: Codable, Identifiable, Hashable {
     }
 }
 
+struct Media: Codable, Identifiable, Hashable {
+    let id: String
+    let kind: String          // image | video | file | voice | sticker | gif
+    let mime: String
+    let size: Int
+    let name: String?
+    let width: Int?
+    let height: Int?
+    let durationMs: Int?
+    let url: String
+
+    var isImage: Bool { kind == "image" || kind == "sticker" || kind == "gif" }
+    var isVideo: Bool { kind == "video" }
+    var isVoice: Bool { kind == "voice" }
+    var isFile: Bool { kind == "file" }
+
+    var displayName: String { name ?? "文件" }
+
+    var sizeText: String {
+        ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+    }
+}
+
 struct Message: Codable, Identifiable, Hashable {
     let seq: Int64
     let id: String
@@ -39,6 +62,7 @@ struct Message: Codable, Identifiable, Hashable {
     let text: String
     let createdAt: Int64
     let clientId: String?
+    var media: Media? = nil
 }
 
 struct Chat: Codable, Identifiable, Hashable {
@@ -82,6 +106,7 @@ struct Chat: Codable, Identifiable, Hashable {
 }
 
 struct LoginResponse: Codable { let token: String; let user: User }
+struct MediaUploadResponse: Codable { let media: Media }
 struct MeResponse: Codable { let user: User }
 struct ChatsResponse: Codable { let chats: [Chat] }
 struct MessagesResponse: Codable { let messages: [Message]; let hasMore: Bool }

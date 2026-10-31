@@ -8,6 +8,8 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft = ""
+    @State private var viewingImage: Media?
+    @State private var viewingVideo: Media?
 
     private var messages: [Message] { app.messages[chat.id] ?? [] }
     private var myId: String? { app.me?.id }
@@ -52,7 +54,13 @@ struct ChatView: View {
                 }
             }
 
-            composer(c)
+            ChatComposer(chatId: chat.id, draft: $draft)
+        }
+        .sheet(item: $viewingImage) { media in
+            ImageViewerSheet(media: media, token: app.token)
+        }
+        .sheet(item: $viewingVideo) { media in
+            VideoPlayerSheet(media: media, token: app.token)
         }
         .background(c.background.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
@@ -77,14 +85,34 @@ struct ChatView: View {
             if dateChanged {
                 DateChipView(label: formatDateHeader(message.createdAt), colors: c)
             }
-            MessageBubbleView(
-                message: message,
-                isOut: isOut,
-                showAuthor: showAuthor,
-                readByPeer: readByPeer,
-                colors: c
-            )
-            .id(message.id)
+            if let media = message.media {
+                HStack {
+                    if isOut { Spacer(minLength: 44) }
+                    MediaMessageView(
+                        message: message,
+                        media: media,
+                        isOut: isOut,
+                        readByPeer: readByPeer,
+                        colors: c,
+                        token: app.token,
+                        onOpenImage: { viewingImage = $0 },
+                        onOpenVideo: { viewingVideo = $0 }
+                    )
+                    if !isOut { Spacer(minLength: 44) }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 1.5)
+                .id(message.id)
+            } else {
+                MessageBubbleView(
+                    message: message,
+                    isOut: isOut,
+                    showAuthor: showAuthor,
+                    readByPeer: readByPeer,
+                    colors: c
+                )
+                .id(message.id)
+            }
         }
     }
 
@@ -129,34 +157,4 @@ struct ChatView: View {
         return "最近在线"
     }
 
-    private func composer(_ c: TgColors) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .font(.system(size: 16))
-                .foregroundColor(c.textPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 20).fill(c.surfaceAlt))
-                .onChange(of: draft) { newValue in
-                    if !newValue.isEmpty { app.sendTyping() }
-                }
-
-            Button {
-                let text = draft
-                draft = ""
-                Task { await app.sendMessage(text, chatId: chat.id) }
-            } label: {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 42, height: 42)
-                    .background(Circle().fill(draft.trimmingCharacters(in: .whitespaces).isEmpty ? c.surfaceAlt.opacity(0.8) : c.accent))
-            }
-            .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(c.header)
-    }
 }

@@ -35,6 +35,9 @@ final class AppState: ObservableObject {
     @Published var typingName: String?
     @Published var toast: String?
     @Published var appActive = true
+    @Published var uploadProgress: Double? = nil
+    @Published var uploadName: String? = nil
+    @Published var uploadFailed = false
 
     @Published var usersDirectory: [User] = []
     @Published var adminUsers: [User] = []
@@ -52,6 +55,8 @@ final class AppState: ObservableObject {
     private var activeChatId: String?
     private var lastTypingAt = Date.distantPast
     private var pendingChatId: String?
+    private var pendingUpload: PendingUpload?
+    private var uploadTask: Task<Void, Never>?
 
     init() {
         let savedBase = defaults.string(forKey: "baseURL") ?? Config.defaultBaseURL
@@ -382,6 +387,104 @@ final class AppState: ObservableObject {
             }
         }
         realtime.connect(baseURL: baseURL, chatId: chatId, token: token)
+    }
+
+    // MARK: - Media
+
+    struct PendingUpload: Equatable {
+        let fileURL: URL
+        let kind: String
+        let mime: String
+        let name: String
+        let caption: String
+        let width: Int?
+        let height: Int?
+        let durationMs: Int?
+        let chatId: String
+    }
+
+    func sendMedia(
+        chatId: String,
+        fileURL: URL,
+        kind: String,
+        mime: String,
+        name: String,
+        caption: String = "",
+        width: Int? = nil,
+        height: Int? = nil,
+        durationMs: Int? = nil
+    ) {
+        let job = PendingUpload(
+            fileURL: fileURL,
+            kind: kind,
+            mime: mime,
+            name: name,
+            caption: caption,
+            width: width,
+            height: height,
+            durationMs: durationMs,
+            chatId: chatId
+        )
+        pendingUpload = job
+        startUpload(job)
+    }
+
+    func retryUpload() {
+        guard let job = pendingUpload else { return }
+        startUpload(job)
+    }
+
+    func cancelUpload() {
+        uploadTask?.cancel()
+        uploadTask = nil
+        pendingUpload = nil
+        uploadProgress = nil
+        uploadName = nil
+        uploadFailed = false
+    }
+
+    private func startUpload(_ job: PendingUpload) {
+        uploadTask?.cancel()
+        uploadFailed = false
+        uploadName = job.name
+        uploadProgress = 0
+
+        uploadTask = Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let media = try await self.api.uploadMedia(
+                    chatId: job.chatId,
+                    fileURL: job.fileURL,
+                    kind: job.kind,
+                    mime: job.mime,
+                    name: job.name,
+                    width: job.width,
+                    height: job.height,
+                    durationMs: job.durationMs,
+                    progress: { value in
+                        Task { @MainActor in
+                            self.uploadProgress = value
+                        }
+                    }
+                )
+                let clientId = UUID().uuidString
+                let response = try await self.api.sendMessage(
+                    chatId: job.chatId,
+                    text: job.caption,
+                    clientId: clientId,
+                    mediaId: media.id
+                )
+                self.messages[job.chatId] = self.merge(self.messages[job.chatId] ?? [], [response.message])
+                await self.loadChats(silent: true)
+                self.uploadProgress = nil
+                self.uploadName = nil
+                self.pendingUpload = nil
+            } catch {
+                if Task.isCancelled { return }
+                self.uploadFailed = true
+                self.toast = error.localizedDescription
+            }
+        }
     }
 
     // MARK: - Background inbox (local notifications)

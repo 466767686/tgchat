@@ -96,8 +96,92 @@ final class APIClient {
         try await request("/api/chats/\(chatId)/messages?before=\(before)&limit=\(limit)")
     }
 
-    func sendMessage(chatId: String, text: String, clientId: String) async throws -> MessageResponse {
-        try await request("/api/chats/\(chatId)/messages", method: "POST", body: ["text": text, "clientId": clientId])
+    func sendMessage(chatId: String, text: String, clientId: String, mediaId: String? = nil) async throws -> MessageResponse {
+        var body: [String: Any] = ["text": text, "clientId": clientId]
+        if let mediaId = mediaId { body["mediaId"] = mediaId }
+        return try await request("/api/chats/\(chatId)/messages", method: "POST", body: body)
+    }
+
+    func mediaURL(_ path: String) -> URL? {
+        url(for: path)
+    }
+
+    /// Multipart upload with progress. Files up to 50 MB (server limit).
+    func uploadMedia(
+        chatId: String,
+        fileURL: URL,
+        kind: String,
+        mime: String,
+        name: String,
+        width: Int? = nil,
+        height: Int? = nil,
+        durationMs: Int? = nil,
+        progress: @escaping (Double) -> Void
+    ) async throws -> Media {
+        guard let endpoint = url(for: "/api/chats/\(chatId)/media") else {
+            throw ApiError.network("服务器地址无效")
+        }
+        let fileData: Data
+        do {
+            fileData = try Data(contentsOf: fileURL)
+        } catch {
+            throw ApiError.server("无法读取文件")
+        }
+
+        let boundary = "----TgChat\(UUID().uuidString)"
+        var body = Data()
+        func append(_ string: String) {
+            body.append(Data(string.utf8))
+        }
+        func field(_ key: String, _ value: String) {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
+            append("\(value)\r\n")
+        }
+
+        field("kind", kind)
+        field("name", name.replacingOccurrences(of: "\"", with: ""))
+        if let width = width { field("width", String(width)) }
+        if let height = height { field("height", String(height)) }
+        if let durationMs = durationMs { field("durationMs", String(durationMs)) }
+
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(name.replacingOccurrences(of: "\"", with: ""))\"\r\n")
+        append("Content-Type: \(mime)\r\n\r\n")
+        body.append(fileData)
+        append("\r\n--\(boundary)--\r\n")
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token ?? "")", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let delegate = UploadProgressDelegate(onProgress: progress)
+        let uploadSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await uploadSession.upload(for: request, from: body)
+        } catch {
+            throw ApiError.network("上传失败，请检查网络")
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw ApiError.network("上传失败")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            if let parsed = try? decoder.decode(ErrorResponse.self, from: data), let message = parsed.error {
+                throw ApiError.server(message)
+            }
+            throw ApiError.server("上传失败（HTTP \(http.statusCode)）")
+        }
+        do {
+            return try decoder.decode(MediaUploadResponse.self, from: data).media
+        } catch {
+            throw ApiError.server("上传响应无法解析")
+        }
     }
 
     func markRead(chatId: String, seq: Int64) async {
@@ -123,5 +207,24 @@ final class APIClient {
 
     func adminUsers() async throws -> UsersResponse {
         try await request("/api/admin/users")
+    }
+}
+
+private final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
+    private let onProgress: (Double) -> Void
+
+    init(onProgress: @escaping (Double) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        onProgress(min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend)))
     }
 }

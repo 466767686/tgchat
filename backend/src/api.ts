@@ -100,13 +100,51 @@ function mapMessage(row: any) {
     text: row.text,
     createdAt: row.created_at,
     clientId: row.client_id ?? null,
+    media: row.media_id
+      ? {
+          id: row.media_id,
+          kind: row.media_kind,
+          mime: row.media_mime,
+          size: row.media_size,
+          name: row.media_name ?? null,
+          width: row.media_width ?? null,
+          height: row.media_height ?? null,
+          durationMs: row.media_duration ?? null,
+          url: `/api/media/${row.media_id}`,
+        }
+      : null,
   };
 }
 
 const MESSAGE_SELECT = `
-  SELECT m.seq, m.id, m.chat_id, m.sender_id, m.text, m.created_at, m.client_id,
-         u.display_name AS sender_name, u.avatar_color AS sender_color
-  FROM messages m JOIN users u ON u.id = m.sender_id`;
+  SELECT m.seq, m.id, m.chat_id, m.sender_id, m.text, m.created_at, m.client_id, m.media_id,
+         u.display_name AS sender_name, u.avatar_color AS sender_color,
+         md.kind AS media_kind, md.mime AS media_mime, md.size AS media_size,
+         md.file_name AS media_name, md.width AS media_width, md.height AS media_height,
+         md.duration_ms AS media_duration
+  FROM messages m
+  JOIN users u ON u.id = m.sender_id
+  LEFT JOIN media md ON md.id = m.media_id`;
+
+function mapMedia(row: any) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    kind: row.kind,
+    mime: row.mime,
+    size: row.size,
+    name: row.file_name ?? null,
+    width: row.width ?? null,
+    height: row.height ?? null,
+    durationMs: row.duration_ms ?? null,
+    url: `/api/media/${row.id}`,
+  };
+}
+
+function intField(value: unknown): number | null {
+  const parsed = parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 async function loadChat(env: Env, chatId: string, viewerId: string) {
   const chat = await env.DB.prepare("SELECT * FROM chats WHERE id = ?").bind(chatId).first<any>();
@@ -196,6 +234,54 @@ export async function handleRequest(
   // ---------------- health ----------------
   if (method === "GET" && path === "/api/health") {
     return json({ ok: true, service: "tgchat", time: new Date().toISOString() });
+  }
+
+  // ---------------- media ----------------
+  if (seg[0] === "api" && seg[1] === "media" && seg.length === 3 && method === "GET") {
+    const url = new URL(request.url);
+    const tokenParam = url.searchParams.get("token");
+    let viewer: UserRow | null = null;
+    if (tokenParam) {
+      const tokenHash = await sha256Hex(tokenParam);
+      viewer = await env.DB.prepare(
+        "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?",
+      )
+        .bind(tokenHash, Date.now())
+        .first<UserRow>();
+    } else {
+      viewer = await authenticate(request, env);
+    }
+    if (!viewer) throw new ApiError(401, "登录已过期，请重新登录", "unauthorized");
+
+    const row = await env.DB.prepare("SELECT * FROM media WHERE id = ?").bind(seg[2]).first<any>();
+    if (!row) throw new ApiError(404, "文件不存在", "not_found");
+    await assertMember(env, row.chat_id, viewer.id);
+
+    const object = await env.MEDIA.get(row.object_key, { range: request.headers });
+    if (!object) throw new ApiError(404, "文件不存在", "not_found");
+
+    const headers = new Headers();
+    headers.set("content-type", row.mime || "application/octet-stream");
+    headers.set("accept-ranges", "bytes");
+    headers.set("cache-control", "private, max-age=604800");
+    const disposition = row.kind === "file" ? "attachment" : "inline";
+    const safeName = String(row.file_name || row.id).replace(/["\\r\n]/g, "");
+    headers.set("content-disposition", `${disposition}; filename="${safeName}"`);
+
+    let status = 200;
+    const range = (object as any).range as { offset?: number; length?: number } | undefined;
+    if (range && typeof range.offset === "number") {
+      const start = range.offset;
+      const length = range.length ?? object.size - start;
+      const end = start + length - 1;
+      headers.set("content-range", `bytes ${start}-${end}/${object.size}`);
+      headers.set("content-length", String(length));
+      status = 206;
+    } else {
+      headers.set("content-length", String(object.size));
+    }
+
+    return new Response(object.body, { status, headers });
   }
 
   // ---------------- auth ----------------
@@ -381,6 +467,46 @@ export async function handleRequest(
   if (seg.length >= 4 && seg[0] === "api" && seg[1] === "chats") {
     const chatId = seg[2];
 
+    if (method === "POST" && seg.length === 4 && seg[3] === "media") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+
+      const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+      if (!contentType.includes("multipart/form-data")) {
+        throw new ApiError(400, "请使用 multipart/form-data 上传", "invalid_input");
+      }
+
+      const form = await request.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) throw new ApiError(400, "缺少文件", "invalid_input");
+
+      const size = file.size;
+      if (size <= 0) throw new ApiError(400, "文件为空", "invalid_input");
+      if (size > 50 * 1024 * 1024) throw new ApiError(413, "文件不能超过 50MB", "too_large");
+
+      const kindRaw = String(form.get("kind") ?? "file");
+      const kind = ["image", "video", "file", "voice", "sticker", "gif"].includes(kindRaw) ? kindRaw : "file";
+      const mime = file.type || "application/octet-stream";
+      const name = typeof form.get("name") === "string" ? String(form.get("name")) : (file.name || null);
+      const width = intField(form.get("width"));
+      const height = intField(form.get("height"));
+      const durationMs = intField(form.get("durationMs"));
+
+      const mediaId = crypto.randomUUID();
+      const objectKey = `media/${chatId}/${mediaId}`;
+      await env.MEDIA.put(objectKey, file.stream(), { httpMetadata: { contentType: mime } });
+
+      const now = Date.now();
+      await env.DB.prepare(
+        "INSERT INTO media (id, chat_id, uploader_id, kind, mime, size, file_name, width, height, duration_ms, object_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(mediaId, chatId, me.id, kind, mime, size, name, width, height, durationMs, objectKey, now)
+        .run();
+
+      const row = await env.DB.prepare("SELECT * FROM media WHERE id = ?").bind(mediaId).first<any>();
+      return json({ media: mapMedia(row) }, 201);
+    }
+
     if (method === "GET" && seg.length === 4 && seg[3] === "messages") {
       const me = await authenticate(request, env);
       await assertMember(env, chatId, me.id);
@@ -400,8 +526,18 @@ export async function handleRequest(
       const me = await authenticate(request, env);
       await assertMember(env, chatId, me.id);
       const body = await readBody(request);
-      const content = text(body.text, "消息内容", 1, 4096);
+      const mediaId = typeof body.mediaId === "string" && body.mediaId ? body.mediaId : null;
+      const rawText = typeof body.text === "string" ? body.text.trim() : "";
+      if (!rawText && !mediaId) throw new ApiError(400, "消息内容不能为空", "invalid_input");
+      if (rawText.length > 4096) throw new ApiError(400, "消息内容过长", "invalid_input");
+      const content = rawText;
       const clientId = typeof body.clientId === "string" ? body.clientId.slice(0, 64) : null;
+
+      if (mediaId) {
+        const media = await env.DB.prepare("SELECT * FROM media WHERE id = ?").bind(mediaId).first<any>();
+        if (!media || media.chat_id !== chatId) throw new ApiError(400, "媒体不存在", "invalid_media");
+        if (media.uploader_id !== me.id) throw new ApiError(403, "不能使用他人上传的媒体", "forbidden");
+      }
 
       if (clientId) {
         const dup = await env.DB.prepare(
@@ -415,9 +551,9 @@ export async function handleRequest(
       const id = crypto.randomUUID();
       const now = Date.now();
       await env.DB.prepare(
-        "INSERT INTO messages (id, chat_id, sender_id, text, created_at, client_id) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, chat_id, sender_id, text, created_at, client_id, media_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
-        .bind(id, chatId, me.id, content, now, clientId)
+        .bind(id, chatId, me.id, content, now, clientId, mediaId)
         .run();
       const row = await env.DB.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).bind(id).first<any>();
       const message = mapMessage(row);
