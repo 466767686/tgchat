@@ -208,6 +208,25 @@ final class APIClient {
         )
     }
 
+    func createChannel(title: String, username: String?, description: String) async throws -> ChatResponse {
+        var body: [String: Any] = ["title": title, "description": description]
+        if let username = username, !username.isEmpty { body["username"] = username }
+        return try await request("/api/channels", method: "POST", body: body)
+    }
+
+    func discoverChannels(query: String) async throws -> ChannelsResponse {
+        let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return try await request("/api/channels/discover?q=\(escaped)")
+    }
+
+    func subscribe(chatId: String) async throws -> ChatResponse {
+        try await request("/api/chats/\(chatId)/subscribe", method: "POST")
+    }
+
+    func unsubscribe(chatId: String) async throws {
+        let _: SimpleResponse = try await request("/api/chats/\(chatId)/subscribe", method: "DELETE")
+    }
+
     func batchChats(_ action: String, chatIds: [String]) async throws {
         let _: SimpleResponse = try await request(
             "/api/chats/batch",

@@ -80,6 +80,7 @@ struct MessageBubbleView: View {
     let showAuthor: Bool
     let readByPeer: Bool
     let colors: TgColors
+    var showViews: Bool = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -142,6 +143,15 @@ struct MessageBubbleView: View {
                     Text(formatTime(message.createdAt))
                         .font(.system(size: 11))
                         .foregroundColor(colors.textTertiary)
+                    if showViews, let views = message.views {
+                        HStack(spacing: 2) {
+                            Image(systemName: "eye")
+                                .font(.system(size: 9))
+                            Text("\(views)")
+                                .font(.system(size: 10))
+                        }
+                        .foregroundColor(colors.textTertiary)
+                    }
                     if isOut {
                         if message.seq == 0 {
                             Image(systemName: "clock")

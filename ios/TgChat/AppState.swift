@@ -361,6 +361,41 @@ final class AppState: ObservableObject {
         }
     }
 
+    func createChannel(title: String, username: String?, description: String) async -> Chat? {
+        do {
+            let chat = try await api.createChannel(title: title, username: username, description: description).chat
+            await loadChats(silent: true)
+            return chat
+        } catch {
+            toast = error.localizedDescription
+            return nil
+        }
+    }
+
+    func discoverChannels(query: String) async -> [ChannelSummary] {
+        (try? await api.discoverChannels(query: query).channels) ?? []
+    }
+
+    func subscribeChannel(chatId: String) async -> Chat? {
+        do {
+            let chat = try await api.subscribe(chatId: chatId).chat
+            await loadChats(silent: true)
+            return chat
+        } catch {
+            toast = error.localizedDescription
+            return nil
+        }
+    }
+
+    func unsubscribeChannel(chatId: String) async {
+        do {
+            try await api.unsubscribe(chatId: chatId)
+            chats.removeAll { $0.id == chatId }
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
     // MARK: - Chat management
 
     func loadFolders() async {

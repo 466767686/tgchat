@@ -9,6 +9,8 @@ struct NewChatView: View {
 
     @State private var query = ""
     @State private var showGroupCreate = false
+    @State private var showChannelCreate = false
+    @State private var showChannelDiscover = false
 
     var body: some View {
         let c = TgColors(dark: scheme == .dark)
@@ -27,6 +29,44 @@ struct NewChatView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("新建群组").font(.system(size: 16, weight: .medium)).foregroundColor(c.textPrimary)
                                 Text("选择成员，创建群聊").font(.system(size: 12)).foregroundColor(c.textSecondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 12)).foregroundColor(c.textTertiary)
+                        }
+                    }
+                    .listRowBackground(c.background)
+                }
+
+                Section {
+                    Button {
+                        showChannelCreate = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle().fill(Color(hex: "#E0A040").opacity(0.18)).frame(width: 46, height: 46)
+                                Image(systemName: "megaphone.fill").foregroundColor(Color(hex: "#E0A040"))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("新建频道").font(.system(size: 16, weight: .medium)).foregroundColor(c.textPrimary)
+                                Text("广播消息给订阅者").font(.system(size: 12)).foregroundColor(c.textSecondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 12)).foregroundColor(c.textTertiary)
+                        }
+                    }
+                    .listRowBackground(c.background)
+
+                    Button {
+                        showChannelDiscover = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle().fill(c.accent.opacity(0.12)).frame(width: 46, height: 46)
+                                Image(systemName: "safari.fill").foregroundColor(c.accent)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("发现频道").font(.system(size: 16, weight: .medium)).foregroundColor(c.textPrimary)
+                                Text("按名称或 @用户名 搜索").font(.system(size: 12)).foregroundColor(c.textSecondary)
                             }
                             Spacer()
                             Image(systemName: "chevron.right").font(.system(size: 12)).foregroundColor(c.textTertiary)
@@ -85,6 +125,20 @@ struct NewChatView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showChannelCreate) {
+                ChannelCreateView { chat in
+                    onOpen(chat)
+                    dismiss()
+                }
+                .environmentObject(app)
+            }
+            .sheet(isPresented: $showChannelDiscover) {
+                ChannelDiscoverView { chat in
+                    onOpen(chat)
+                    dismiss()
+                }
+                .environmentObject(app)
             }
             .sheet(isPresented: $showGroupCreate) {
                 GroupCreateView { chat in

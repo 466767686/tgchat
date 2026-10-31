@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS chats (
   slow_mode  INTEGER NOT NULL DEFAULT 0,
   history_visible INTEGER NOT NULL DEFAULT 1,
   topics_enabled  INTEGER NOT NULL DEFAULT 0,
+  username       TEXT,
+  is_public      INTEGER NOT NULL DEFAULT 0,
+  discussion_chat_id TEXT,
   created_at INTEGER NOT NULL,
   created_by TEXT
 );
@@ -112,6 +115,14 @@ CREATE TABLE IF NOT EXISTS chat_join_requests (
   created_at INTEGER NOT NULL,
   status     TEXT NOT NULL DEFAULT 'pending'
 );
+
+CREATE TABLE IF NOT EXISTS message_views (
+  message_id TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  viewed_at  INTEGER NOT NULL,
+  PRIMARY KEY (message_id, user_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_username ON chats(username);
 
 CREATE TABLE IF NOT EXISTS folders (
   id         TEXT PRIMARY KEY,

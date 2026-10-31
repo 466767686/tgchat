@@ -134,9 +134,33 @@ async function withPolls(env: Env, rows: any[], mapped: any[], viewerId: string)
   return mapped;
 }
 
+async function withViews(env: Env, rows: any[], mapped: any[]) {
+  if (!rows.length) return mapped;
+  const ids = rows.map((row: any) => row.id);
+  const placeholders = ids.map(() => "?").join(",");
+  const result = await env.DB.prepare(
+    `SELECT message_id, COUNT(*) AS n FROM message_views WHERE message_id IN (${placeholders}) GROUP BY message_id`,
+  )
+    .bind(...ids)
+    .all<any>();
+  const counts: Record<string, number> = {};
+  for (const row of result.results) counts[row.message_id] = row.n;
+  for (let i = 0; i < rows.length; i++) mapped[i].views = counts[rows[i].id] ?? 0;
+  return mapped;
+}
+
+async function recordViews(env: Env, rows: any[], userId: string) {
+  if (!rows.length) return;
+  const statement = env.DB.prepare(
+    "INSERT OR IGNORE INTO message_views (message_id, user_id, viewed_at) VALUES (?, ?, ?)",
+  );
+  await env.DB.batch(rows.slice(0, 100).map((row: any) => statement.bind(row.id, userId, Date.now())));
+}
+
 async function decorate(env: Env, rows: any[], mapped: any[], viewerId: string) {
   await withReactions(env, rows, mapped, viewerId);
   await withPolls(env, rows, mapped, viewerId);
+  await withViews(env, rows, mapped);
   return mapped;
 }
 
@@ -158,6 +182,7 @@ function mapMessage(row: any) {
     pinned: !!row.pinned,
     topicId: row.topic_id ?? null,
     poll: null as any,
+    views: null as number | null,
     replyTo: row.reply_to_seq
       ? {
           seq: row.reply_to_seq,
@@ -288,6 +313,10 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
     slowMode: chat.slow_mode ?? 0,
     historyVisible: (chat.history_visible ?? 1) === 1,
     topicsEnabled: (chat.topics_enabled ?? 0) === 1,
+    username: chat.username ?? null,
+    isPublic: (chat.is_public ?? 0) === 1,
+    discussionChatId: chat.discussion_chat_id ?? null,
+    subscriberCount: members.results.length,
     createdAt: chat.created_at,
     lastReadSeq: me?.last_read_seq ?? 0,
     otherReadSeq: otherRead?.n ?? 0,
@@ -335,7 +364,7 @@ async function createChat(
   env: Env,
   creatorId: string,
   memberIds: string[],
-  type: "direct" | "group" | "saved",
+  type: "direct" | "group" | "saved" | "channel",
   title: string | null,
 ): Promise<string> {
   const id = crypto.randomUUID();
@@ -507,6 +536,8 @@ export async function handleRequest(
     const rows = await env.DB.prepare(
       `SELECT c.id, c.type, c.title, c.description, c.announcement, c.photo_url, c.join_mode,
               c.slow_mode, c.history_visible, c.topics_enabled,
+              c.username, c.is_public, c.discussion_chat_id,
+              (SELECT COUNT(*) FROM chat_members cmc WHERE cmc.chat_id = c.id) AS subscriber_count,
               c.created_at, cm.last_read_seq, cm.role AS my_role,
               cm.pinned AS my_pinned, cm.archived AS my_archived,
               cm.folder_id AS my_folder, cm.wallpaper AS my_wallpaper,
@@ -570,6 +601,10 @@ export async function handleRequest(
       slowMode: c.slow_mode ?? 0,
       historyVisible: (c.history_visible ?? 1) === 1,
       topicsEnabled: (c.topics_enabled ?? 0) === 1,
+      username: c.username ?? null,
+      isPublic: (c.is_public ?? 0) === 1,
+      discussionChatId: c.discussion_chat_id ?? null,
+      subscriberCount: c.subscriber_count ?? 0,
       createdAt: c.created_at,
       myRole: c.my_role ?? "member",
       pinned: (c.my_pinned ?? 0) === 1,
@@ -732,6 +767,58 @@ export async function handleRequest(
     return ok({ ok: true });
   }
 
+  if (method === "POST" && path === "/api/channels") {
+    const me = await authenticate(request, env);
+    const body = await readBody(request);
+    const title = text(body.title, "频道名称", 1, 64);
+    const usernameRaw = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
+    if (usernameRaw && !/^[a-z0-9_]{4,32}$/.test(usernameRaw)) {
+      throw new ApiError(400, "用户名需为 4-32 位小写字母、数字或下划线", "invalid_username");
+    }
+    if (usernameRaw) {
+      const taken = await env.DB.prepare("SELECT 1 AS x FROM chats WHERE username = ?").bind(usernameRaw).first();
+      if (taken) throw new ApiError(409, "用户名已被占用", "username_taken");
+    }
+
+    const id = await createChat(env, me.id, [], "channel", title);
+    if (usernameRaw) {
+      await env.DB.prepare("UPDATE chats SET username = ?, is_public = 1 WHERE id = ?").bind(usernameRaw, id).run();
+    }
+    if (typeof body.description === "string" && body.description.trim()) {
+      await env.DB.prepare("UPDATE chats SET description = ? WHERE id = ?")
+        .bind(body.description.trim().slice(0, 512), id)
+        .run();
+    }
+    return json({ chat: await loadChat(env, id, me.id) }, 201);
+  }
+
+  if (method === "GET" && path === "/api/channels/discover") {
+    const me = await authenticate(request, env);
+    const query = (new URL(request.url).searchParams.get("q") ?? "").trim();
+    const like = `%${query}%`;
+    const rows = await env.DB.prepare(
+      `SELECT c.id, c.title, c.username, c.description, c.created_at,
+              (SELECT COUNT(*) FROM chat_members cm WHERE cm.chat_id = c.id) AS subs,
+              (SELECT 1 FROM chat_members cm WHERE cm.chat_id = c.id AND cm.user_id = ? LIMIT 1) AS joined
+       FROM chats c
+       WHERE c.type = 'channel' AND c.is_public = 1
+         AND (c.username LIKE ? OR c.title LIKE ?)
+       ORDER BY subs DESC LIMIT 50`,
+    )
+      .bind(me.id, like, like)
+      .all<any>();
+    return json({
+      channels: rows.results.map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        username: c.username,
+        description: c.description ?? null,
+        subscriberCount: c.subs ?? 0,
+        joined: !!c.joined,
+      })),
+    });
+  }
+
   if (method === "POST" && path === "/api/chats") {
     const me = await authenticate(request, env);
     const body = await readBody(request);
@@ -842,6 +929,33 @@ export async function handleRequest(
     if (typeof body.topicsEnabled === "boolean") {
       fields.push("topics_enabled = ?");
       values.push(body.topicsEnabled ? 1 : 0);
+    }
+    if (typeof body.username === "string") {
+      const username = body.username.trim().toLowerCase();
+      if (username && !/^[a-z0-9_]{4,32}$/.test(username)) {
+        throw new ApiError(400, "用户名需为 4-32 位小写字母、数字或下划线", "invalid_username");
+      }
+      if (username) {
+        const taken = await env.DB.prepare("SELECT id FROM chats WHERE username = ? AND id != ?")
+          .bind(username, chatId)
+          .first();
+        if (taken) throw new ApiError(409, "用户名已被占用", "username_taken");
+        fields.push("username = ?", "is_public = 1");
+        values.push(username);
+      } else {
+        fields.push("username = NULL", "is_public = 0");
+      }
+    }
+    if (typeof body.discussionChatId === "string") {
+      const discussion = body.discussionChatId;
+      if (discussion) {
+        const target = await env.DB.prepare("SELECT type FROM chats WHERE id = ?").bind(discussion).first<any>();
+        if (!target || target.type !== "group") {
+          throw new ApiError(400, "讨论组必须是群组", "invalid_input");
+        }
+      }
+      fields.push("discussion_chat_id = ?");
+      values.push(discussion || null);
     }
     if (!fields.length) throw new ApiError(400, "没有可更新的字段", "invalid_input");
 
@@ -988,6 +1102,40 @@ export async function handleRequest(
       return json({ chat: await loadChat(env, chatId, me.id) });
     }
 
+    if ((method === "POST" || method === "DELETE") && seg.length === 4 && seg[3] === "subscribe") {
+      const me = await authenticate(request, env);
+      const chat = await getChatRow(env, chatId);
+      if (chat.type !== "channel") throw new ApiError(400, "不是频道", "invalid_input");
+
+      if (method === "POST") {
+        if (chat.is_public !== 1) {
+          const invite = await env.DB.prepare("SELECT 1 AS x FROM chat_invites WHERE chat_id = ? AND revoked = 0")
+            .bind(chatId)
+            .first();
+          if (!invite) throw new ApiError(403, "私有频道需要邀请链接", "forbidden");
+        }
+        const exists = await env.DB.prepare("SELECT 1 AS x FROM chat_members WHERE chat_id = ? AND user_id = ?")
+          .bind(chatId, me.id)
+          .first();
+        if (!exists) {
+          const maxSeq = await env.DB.prepare("SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE chat_id = ?")
+            .bind(chatId)
+            .first<any>();
+          await env.DB.prepare(
+            "INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq, role, joined_seq) VALUES (?, ?, ?, 0, 'member', ?)",
+          )
+            .bind(chatId, me.id, Date.now(), maxSeq?.s ?? 0)
+            .run();
+        }
+        return json({ chat: await loadChat(env, chatId, me.id) });
+      }
+
+      const role = await chatRole(env, chatId, me.id);
+      if (role === "owner") throw new ApiError(400, "频道主不能退订自己的频道", "invalid_input");
+      await env.DB.prepare("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?").bind(chatId, me.id).run();
+      return ok({ ok: true });
+    }
+
     if (method === "POST" && seg.length === 4 && seg[3] === "wallpaper") {
       const me = await authenticate(request, env);
       await assertMember(env, chatId, me.id);
@@ -1069,6 +1217,9 @@ export async function handleRequest(
       const rows = await env.DB.prepare(sql).bind(...bindings).all<any>();
       const mapped = rows.results.map(mapMessage);
       await decorate(env, rows.results, mapped, me.id);
+      if (chat.type === "channel") {
+        await recordViews(env, rows.results, me.id);
+      }
       const messages = mapped.reverse();
       return json({ messages, hasMore: rows.results.length === limit });
     }
@@ -1097,6 +1248,14 @@ export async function handleRequest(
           if (waitMs > 0) {
             throw new ApiError(429, `慢速模式：请等待 ${Math.ceil(waitMs / 1000)} 秒`, "slow_mode");
           }
+        }
+      }
+
+      const chatMeta = await getChatRow(env, chatId);
+      if (chatMeta.type === "channel") {
+        const roleNow = await chatRole(env, chatId, me.id);
+        if (roleNow !== "owner" && roleNow !== "admin") {
+          throw new ApiError(403, "只有频道管理员可以发布", "forbidden");
         }
       }
 

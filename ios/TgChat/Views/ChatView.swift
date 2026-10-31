@@ -27,6 +27,7 @@ struct ChatView: View {
     @State private var newTopicTitle = ""
     @State private var reportTarget: Message?
     @State private var showCall = false
+    @State private var discussionChat: Chat?
 
     private var allMessages: [Message] { app.messages[chat.id] ?? [] }
     private var messages: [Message] {
@@ -64,6 +65,15 @@ struct ChatView: View {
 
             if selectionMode {
                 selectionBar(c)
+            } else if liveChat.isChannel && !liveChat.canManage {
+                HStack(spacing: 6) {
+                    Image(systemName: "megaphone.fill").font(.system(size: 11))
+                    Text("频道仅管理员可发布").font(.system(size: 12))
+                }
+                .foregroundColor(c.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(c.header)
             } else {
                 if muted {
                     HStack(spacing: 6) {
@@ -169,6 +179,11 @@ struct ChatView: View {
         .onReceive(CallService.shared.$state) { state in
             if state.isBusy { showCall = true }
         }
+        .sheet(item: $discussionChat) { chat in
+            NavigationStack {
+                ChatView(chat: chat)
+            }
+        }
         .sheet(isPresented: $showCall, onDismiss: {
             if !CallService.shared.state.isBusy {
                 CallService.shared.reset()
@@ -192,7 +207,7 @@ struct ChatView: View {
             }
 
             Button {
-                if liveChat.isGroup { showGroupInfo = true }
+                if liveChat.isGroup || liveChat.isChannel { showGroupInfo = true }
             } label: {
                 HStack(spacing: 10) {
                     AvatarView(
@@ -262,6 +277,9 @@ struct ChatView: View {
     private var statusText: String {
         if let typing = app.typingName {
             return "\(typing) 正在输入…"
+        }
+        if liveChat.isChannel {
+            return "\(liveChat.subscriberCount ?? liveChat.members.count) 位订阅者"
         }
         if liveChat.isGroup {
             return "\(liveChat.members.count) 位成员"
@@ -552,6 +570,15 @@ struct ChatView: View {
                 Task { await app.deleteMessage(chatId: chat.id, seq: message.seq) }
             } label: {
                 Label("删除", systemImage: "trash")
+            }
+        }
+
+        if liveChat.isChannel, let discussion = liveChat.discussionChatId,
+           let chat = app.chat(byId: discussion) {
+            Button {
+                discussionChat = chat
+            } label: {
+                Label("评论", systemImage: "bubble.left.and.bubble.right")
             }
         }
 

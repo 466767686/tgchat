@@ -117,6 +117,7 @@ struct Message: Codable, Identifiable, Hashable {
     var reactions: [Reaction] = []
     var topicId: String? = nil
     var poll: Poll? = nil
+    var views: Int? = nil
 }
 
 struct Chat: Codable, Identifiable, Hashable {
@@ -137,6 +138,10 @@ struct Chat: Codable, Identifiable, Hashable {
     var slowMode: Int? = nil
     var historyVisible: Bool? = nil
     var topicsEnabled: Bool? = nil
+    var username: String? = nil
+    var isPublic: Bool? = nil
+    var discussionChatId: String? = nil
+    var subscriberCount: Int? = nil
     var pinned: Bool = false
     var archived: Bool = false
     var folderId: String? = nil
@@ -144,6 +149,7 @@ struct Chat: Codable, Identifiable, Hashable {
 
     var isGroup: Bool { type == "group" }
     var isSaved: Bool { type == "saved" }
+    var isChannel: Bool { type == "channel" }
     var isOwner: Bool { myRole == "owner" }
     var canManage: Bool { myRole == "owner" || myRole == "admin" }
 
@@ -153,12 +159,14 @@ struct Chat: Codable, Identifiable, Hashable {
 
     func displayTitle(myId: String?) -> String {
         if isSaved { return "收藏夹" }
+        if isChannel { return (title?.isEmpty == false ? title! : "频道") }
         if isGroup { return (title?.isEmpty == false ? title! : "群聊") }
         return peer(myId: myId)?.title ?? "会话"
     }
 
     func avatarColor(myId: String?) -> String {
         if isSaved { return "#3390EC" }
+        if isChannel { return "#E0A040" }
         if isGroup { return "#7BC862" }
         return peer(myId: myId)?.avatarColor ?? "#3390EC"
     }
@@ -196,6 +204,16 @@ struct Folder: Codable, Identifiable, Hashable {
 }
 
 struct FoldersResponse: Codable { let folders: [Folder] }
+
+struct ChannelSummary: Codable, Identifiable, Hashable {
+    let id: String
+    let title: String
+    let username: String?
+    let description: String?
+    let subscriberCount: Int
+    let joined: Bool
+}
+struct ChannelsResponse: Codable { let channels: [ChannelSummary] }
 struct FolderResponse: Codable { let folder: Folder }
 struct TopicResponse: Codable { let topic: Topic }
 struct PollResponse: Codable { let poll: Poll }
