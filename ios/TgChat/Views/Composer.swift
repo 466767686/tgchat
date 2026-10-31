@@ -47,6 +47,8 @@ struct ChatComposer: View {
     @State private var pickedItems: [PickedMedia] = []
     @State private var showMediaCompose = false
     @State private var showEmoji = false
+    @State private var showStickers = false
+    @StateObject private var recorder = VoiceRecorder()
 
     var body: some View {
         let c = TgColors(dark: scheme == .dark)
@@ -87,6 +89,11 @@ struct ChatComposer: View {
                 .padding(.vertical, 4)
             }
 
+            if showStickers {
+                StickerPanel(chatId: chatId)
+                    .environmentObject(app)
+            }
+
             if showEmoji {
                 ScrollView {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 8), spacing: 6) {
@@ -104,58 +111,118 @@ struct ChatComposer: View {
                 .background(c.surfaceAlt)
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
-                Button {
-                    showAttachMenu = true
-                } label: {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(c.textSecondary)
-                        .frame(width: 34, height: 34)
-                }
+            if recorder.isRecording {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(c.danger)
+                        .frame(width: 9, height: 9)
+                    Text(recorderTime(recorder.duration))
+                        .font(.system(size: 13, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundColor(c.textPrimary)
 
-                TextField("Message", text: $draft, axis: .vertical)
-                    .lineLimit(1...5)
-                    .font(.system(size: 16))
-                    .foregroundColor(c.textPrimary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 20).fill(c.surfaceAlt))
-                    .onChange(of: draft) { newValue in
-                        if !newValue.isEmpty { app.sendTyping() }
+                    HStack(spacing: 2) {
+                        ForEach(0..<recentLevels.count, id: \.self) { index in
+                            Capsule()
+                                .fill(c.accent)
+                                .frame(width: 2.5, height: max(3, recentLevels[index] * 26))
+                        }
+                    }
+                    .frame(height: 26)
+
+                    Spacer()
+
+                    Button("取消") { recorder.cancel() }
+                        .font(.system(size: 13))
+                        .foregroundColor(c.textSecondary)
+
+                    Button {
+                        sendVoice()
+                    } label: {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Circle().fill(c.accent))
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(c.header)
+            } else {
+                HStack(alignment: .bottom, spacing: 8) {
+                    Button {
+                        showAttachMenu = true
+                    } label: {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(c.textSecondary)
+                            .frame(width: 34, height: 34)
                     }
 
-                Button {
-                    showEmoji.toggle()
-                } label: {
-                    Image(systemName: "face.smiling")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(showEmoji ? c.accent : c.textSecondary)
-                        .frame(width: 32, height: 34)
-                }
+                    TextField("Message", text: $draft, axis: .vertical)
+                        .lineLimit(1...5)
+                        .font(.system(size: 16))
+                        .foregroundColor(c.textPrimary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 20).fill(c.surfaceAlt))
+                        .onChange(of: draft) { newValue in
+                            if !newValue.isEmpty { app.sendTyping() }
+                        }
 
-                Button {
-                    let text = draft
-                    draft = ""
-                    Task { await app.sendMessage(text, chatId: chatId) }
-                } label: {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundColor(.white)
-                        .frame(width: 42, height: 42)
-                        .background(
-                            Circle().fill(
-                                draft.trimmingCharacters(in: .whitespaces).isEmpty
-                                    ? c.surfaceAlt.opacity(0.8)
-                                    : c.accent
-                            )
-                        )
+                    Button {
+                        showStickers.toggle()
+                        if showStickers { showEmoji = false }
+                    } label: {
+                        Image(systemName: "face.dashed")
+                            .font(.system(size: 19, weight: .medium))
+                            .foregroundColor(showStickers ? c.accent : c.textSecondary)
+                            .frame(width: 30, height: 34)
+                    }
+
+                    Button {
+                        showEmoji.toggle()
+                        if showEmoji { showStickers = false }
+                    } label: {
+                        Image(systemName: "face.smiling")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(showEmoji ? c.accent : c.textSecondary)
+                            .frame(width: 30, height: 34)
+                    }
+
+                    if draft.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Button {
+                            showEmoji = false
+                            showStickers = false
+                            recorder.start()
+                        } label: {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundColor(.white)
+                                .frame(width: 42, height: 42)
+                                .background(Circle().fill(c.accent))
+                        }
+                        .disabled(app.uploadProgress != nil)
+                    } else {
+                        Button {
+                            let text = draft
+                            draft = ""
+                            Task { await app.sendMessage(text, chatId: chatId) }
+                        } label: {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundColor(.white)
+                                .frame(width: 42, height: 42)
+                                .background(Circle().fill(c.accent))
+                        }
+                        .disabled(app.uploadProgress != nil)
+                    }
                 }
-                .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || app.uploadProgress != nil)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(c.header)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(c.header)
         }
         .confirmationDialog("发送", isPresented: $showAttachMenu, titleVisibility: .hidden) {
             Button("照片或视频") { showPhotoPicker = true }
@@ -185,6 +252,28 @@ struct ChatComposer: View {
             MediaComposeSheet(items: pickedItems, chatId: chatId)
                 .environmentObject(app)
         }
+    }
+
+    private var recentLevels: [CGFloat] {
+        Array(recorder.levels.suffix(26))
+    }
+
+    private func recorderTime(_ value: TimeInterval) -> String {
+        let seconds = max(0, Int(value))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func sendVoice() {
+        guard let (url, ms) = recorder.stop() else { return }
+        app.sendMedia(
+            chatId: chatId,
+            fileURL: url,
+            kind: "voice",
+            mime: "audio/mp4",
+            name: "voice.m4a",
+            caption: "",
+            durationMs: ms
+        )
     }
 
     private func loadPicked(_ items: [PhotosPickerItem]) async {

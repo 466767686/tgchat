@@ -134,6 +134,14 @@ struct MediaMessageView: View {
                     .cornerRadius(12)
                 }
                 .buttonStyle(.plain)
+            case "voice":
+                VoiceMessageView(
+                    message: message,
+                    media: media,
+                    isOut: isOut,
+                    colors: colors,
+                    token: token
+                )
             default:
                 FileAttachmentRow(media: media, isOut: isOut, colors: colors, token: token)
             }
