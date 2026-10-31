@@ -96,7 +96,7 @@ struct NoteDisguiseView: View {
         .sheet(isPresented: $showCompose) {
             ComposeNoteView(
                 title: $draftTitle,
-                body: $draftBody,
+                noteBody: $draftBody,
                 accent: accent,
                 deep: deep
             ) {
@@ -388,7 +388,7 @@ struct NoteDetailView: View {
 
 struct ComposeNoteView: View {
     @Binding var title: String
-    @Binding var body: String
+    @Binding var noteBody: String
     let accent: Color
     let deep: Color
     let onSave: () -> Void
@@ -401,7 +401,7 @@ struct ComposeNoteView: View {
                 TextField("标题", text: $title)
                     .font(.system(size: 20, weight: .semibold, design: .rounded))
                     .foregroundColor(deep)
-                TextField("写点什么…", text: $body, axis: .vertical)
+                TextField("写点什么…", text: $noteBody, axis: .vertical)
                     .font(.system(size: 15, design: .rounded))
                     .lineLimit(6...12)
                 Spacer()
