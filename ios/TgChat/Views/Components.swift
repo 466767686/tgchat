@@ -97,7 +97,7 @@ struct MessageBubbleView: View {
         var width = ceil(rect.width)
         if message.replyTo != nil { width = max(width, 190) }
         if message.forwardedFrom != nil { width = max(width, 150) }
-        let minimum: CGFloat = message.replyTo == nil ? 92 : 190
+        let minimum: CGFloat = message.replyTo == nil ? 120 : 190
         return max(minimum, min(264, width))
     }
 
@@ -123,6 +123,7 @@ struct MessageBubbleView: View {
                     .padding(.vertical, 4)
                     .padding(.horizontal, 6)
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.06)))
+                    .frame(width: textWidth, alignment: .leading)
                     .padding(.bottom, 2)
                 }
 
@@ -187,6 +188,7 @@ struct MessageBubbleView: View {
                         }
                     }
                 }
+                .frame(width: textWidth, alignment: .leading)
             }
             .padding(.leading, isOut ? 11 : 19)
             .padding(.trailing, isOut ? 19 : 11)
