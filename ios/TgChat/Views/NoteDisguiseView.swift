@@ -542,15 +542,13 @@ struct LockPadView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 error = true
                 if !reduceMotion {
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.35)) {
-                        shake = 10
-                    }
+                    withAnimation(Motion.quick) { shake = 10 }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) { shake = -8 }
+                        withAnimation(Motion.quick) { shake = -8 }
                     }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
-                    withAnimation(.easeOut(duration: 0.15)) { shake = 0 }
+                    withAnimation(Motion.fade) { shake = 0 }
                     input = ""
                 }
             }

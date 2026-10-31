@@ -143,7 +143,7 @@ struct ChatComposer: View {
                     tab: $panelTab,
                     onEmoji: { draft += $0 },
                     onClose: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                        withAnimation(Motion.animation(Motion.standard, reduceMotion: reduceMotion)) {
                             showPanel = false
                         }
                     }

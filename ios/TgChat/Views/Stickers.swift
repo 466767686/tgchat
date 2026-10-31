@@ -263,7 +263,7 @@ struct StickerPanel: View {
                 HStack(spacing: 6) {
                     ForEach(Array(EmojiCatalog.categories.enumerated()), id: \.element.id) { index, item in
                         Button {
-                            withAnimation(.easeOut(duration: 0.18)) { category = index }
+                            withAnimation(Motion.animation(Motion.fade, reduceMotion: reduceMotion)) { category = index }
                         } label: {
                             Text(item.title)
                                 .font(.system(size: 11, weight: category == index ? .semibold : .regular))
@@ -358,7 +358,7 @@ struct StickerPanel: View {
                     HStack(spacing: 10) {
                         ForEach(library.packs) { item in
                             Button {
-                                withAnimation(.easeOut(duration: 0.15)) { selectedPack = item.id }
+                                withAnimation(Motion.animation(Motion.fade, reduceMotion: reduceMotion)) { selectedPack = item.id }
                             } label: {
                                 StickerThumb(
                                     url: item.files.isEmpty ? nil : library.fileURL(pack: item, index: 0),
