@@ -8,7 +8,7 @@ backend/  Cloudflare Worker：REST API + WebSocket(Durable Object) + D1 数据�
 docs/     部署说明、API 文档、功能清单
 ```
 
-> **当前实例已部署**：`https://tgchat-api.doukuai798.workers.dev`（D1 数据库 `tgchat`，区域 APAC）。
+> **当前实例已部署**：`https://chat.132778.xyz`（自定义域名，国内可达；Worker 本体 `tgchat-api`，D1 数据库 `tgchat`，区域 APAC）。
 > 客户端默认服务器地址已编译为该地址，装好即可登录。
 
 ## 已实现（速览）
@@ -33,7 +33,7 @@ docs/     部署说明、API 文档、功能清单
 
 `ios/` 下是同一后端的 SwiftUI 客户端，包含登录、会话列表、聊天（实时收发 / 输入中 / 双勾）、新建会话、设置、用户管理。
 
-构建方式（不需要 Mac）：仓库推到 GitHub 后，Actions 里的 **iOS unsigned IPA** 工作流会自动用 `macos-latest` runner 编译并上传 `TgChat-unsigned.ipa` 工件；本仓库的成品质检在 `dist/TgChat-1.0.0-unsigned.ipa`（34 KB，arm64，iOS 16+），用你自己的证书重签安装即可。
+构建方式（不需要 Mac）：仓库推到 GitHub 后，Actions 里的 **iOS unsigned IPA** 工作流会自动用 `macos-latest` runner 编译并上传 `TgChat-unsigned.ipa` 工件；本仓库的成品质检在 `dist/TgChat-1.0.0-unsigned.ipa`（约 0.4 MB，arm64，iOS 16+），用你自己的证书重签安装即可。
 
 > 注意：`macos-14` 标签在这个账号下会被立刻取消（镜像已下线），工作流固定使用 `macos-latest`。
 

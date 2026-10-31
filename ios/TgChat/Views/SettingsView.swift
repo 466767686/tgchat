@@ -7,6 +7,8 @@ struct SettingsView: View {
 
     @State private var showServer = false
     @State private var showLogout = false
+    @State private var showPin = false
+    @State private var pinDraft = ""
 
     var body: some View {
         let c = TgColors(dark: scheme == .dark)
@@ -65,6 +67,39 @@ struct SettingsView: View {
                     Text("外观与服务器")
                 }
 
+                Section {
+                    Toggle("计算器伪装", isOn: Binding(
+                        get: { app.disguiseEnabled },
+                        set: { app.setDisguise($0) }
+                    ))
+                    .listRowBackground(c.background)
+
+                    if app.disguiseEnabled {
+                        Button {
+                            pinDraft = ""
+                            showPin = true
+                        } label: {
+                            HStack {
+                                Text("解锁密码").foregroundColor(c.textPrimary)
+                                Spacer()
+                                Text("••••")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(c.textSecondary)
+                            }
+                        }
+                        .listRowBackground(c.background)
+
+                        Button {
+                            app.lock()
+                        } label: {
+                            Text("立即锁定").foregroundColor(c.accent)
+                        }
+                        .listRowBackground(c.background)
+                    }
+                } header: {
+                    Text("隐私")
+                }
+
                 if app.me?.role == "admin" {
                     Section {
                         NavigationLink {
@@ -106,6 +141,17 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showServer) {
                 ServerURLSheet().environmentObject(app)
+            }
+            .alert("修改解锁密码", isPresented: $showPin) {
+                SecureField("4-8 位数字", text: $pinDraft)
+                    .keyboardType(.numberPad)
+                Button("保存") {
+                    if pinDraft.count >= 4 { app.setPin(pinDraft) }
+                    pinDraft = ""
+                }
+                Button("取消", role: .cancel) { pinDraft = "" }
+            } message: {
+                Text("在计算器上输入该密码后按 = 即可进入聊天")
             }
             .confirmationDialog("退出登录", isPresented: $showLogout, titleVisibility: .visible) {
                 Button("退出", role: .destructive) {

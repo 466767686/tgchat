@@ -15,6 +15,7 @@ struct TgChatApp: App {
 struct RootView: View {
     @EnvironmentObject private var app: AppState
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     private var effectiveScheme: ColorScheme {
         switch app.themeMode {
@@ -26,7 +27,9 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if app.booting {
+            if app.disguiseEnabled && app.locked {
+                CalculatorView()
+            } else if app.booting {
                 SplashView()
             } else if app.isLoggedIn {
                 ChatsView()
@@ -46,6 +49,9 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: app.toast)
+        .onChange(of: scenePhase) { phase in
+            if phase == .background { app.lock() }
+        }
     }
 }
 

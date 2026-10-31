@@ -2,7 +2,7 @@ import Foundation
 
 enum Config {
     /// 与 Android 客户端使用同一个后端。
-    static let defaultBaseURL = "https://tgchat-api.doukuai798.workers.dev"
+    static let defaultBaseURL = "https://chat.132778.xyz"
     static let appVersion = "1.0.0"
 }
 

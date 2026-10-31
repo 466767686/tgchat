@@ -20,6 +20,10 @@ final class AppState: ObservableObject {
     @Published var me: User?
     @Published var baseURL: String
     @Published var themeMode: ThemeMode
+    @Published var locked = true
+    @Published var disguiseEnabled: Bool {
+        didSet { UserDefaults.standard.set(disguiseEnabled, forKey: "disguiseEnabled") }
+    }
 
     @Published var chats: [Chat] = []
     @Published var chatsLoading = false
@@ -51,6 +55,8 @@ final class AppState: ObservableObject {
         baseURL = savedBase
         api.baseURL = savedBase
         themeMode = ThemeMode(rawValue: defaults.string(forKey: "theme") ?? "system") ?? .system
+        disguiseEnabled = UserDefaults.standard.object(forKey: "disguiseEnabled") as? Bool ?? true
+        locked = disguiseEnabled
         if let savedToken = defaults.string(forKey: "token"), !savedToken.isEmpty {
             token = savedToken
             api.token = savedToken
@@ -110,6 +116,7 @@ final class AppState: ObservableObject {
         chatsPoll?.cancel()
         chatPoll?.cancel()
         clearSession()
+        lock()
     }
 
     private func clearSession() {
@@ -144,6 +151,27 @@ final class AppState: ObservableObject {
     func setTheme(_ mode: ThemeMode) {
         themeMode = mode
         defaults.set(mode.rawValue, forKey: "theme")
+    }
+
+    // MARK: - Calculator disguise
+
+    var unlockPin: String { defaults.string(forKey: "unlockPin") ?? "1234" }
+
+    func setPin(_ pin: String) {
+        defaults.set(pin, forKey: "unlockPin")
+    }
+
+    func setDisguise(_ enabled: Bool) {
+        disguiseEnabled = enabled
+        if enabled { locked = true }
+    }
+
+    func unlock() {
+        locked = false
+    }
+
+    func lock() {
+        if disguiseEnabled { locked = true }
     }
 
     func clearToast() {

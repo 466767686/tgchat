@@ -20,7 +20,7 @@ targets:
     info:
       path: TgChat/Info.plist
       properties:
-        CFBundleDisplayName: Telegram
+        CFBundleDisplayName: 计算器
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
@@ -34,6 +34,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: "NO"
         ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
 schemes:
   TgChat:
