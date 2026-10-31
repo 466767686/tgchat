@@ -85,22 +85,63 @@ struct MessageBubbleView: View {
         HStack(spacing: 0) {
             if isOut { Spacer(minLength: 44) }
             VStack(alignment: .leading, spacing: 3) {
+                if let reply = message.replyTo {
+                    HStack(spacing: 6) {
+                        Capsule()
+                            .fill(parseHexColor(message.senderColor, colors.accent))
+                            .frame(width: 2.5)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(reply.senderName)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(colors.accent)
+                            Text(reply.text.isEmpty ? "消息" : reply.text)
+                                .font(.system(size: 12))
+                                .foregroundColor(colors.textSecondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.06)))
+                    .padding(.bottom, 2)
+                }
+
+                if let forwarded = message.forwardedFrom {
+                    Text("转发自 \(forwarded)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(colors.accent)
+                        .padding(.bottom, 2)
+                }
+
                 if showAuthor {
                     Text(message.senderName)
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundColor(Color(hex: message.senderColor))
                 }
-                Text(message.text)
-                    .font(.system(size: 16))
-                    .foregroundColor(isOut ? colors.bubbleOutText : colors.bubbleInText)
-                    .frame(maxWidth: 280, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                if message.deleted {
+                    Text("消息已删除")
+                        .font(.system(size: 15))
+                        .italic()
+                        .foregroundColor(colors.textTertiary)
+                } else {
+                    Text(formattedText(message.text))
+                        .font(.system(size: 16))
+                        .foregroundColor(isOut ? colors.bubbleOutText : colors.bubbleInText)
+                        .tint(colors.accent)
+                        .frame(maxWidth: 280, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 HStack(spacing: 3) {
+                    if message.editedAt != nil {
+                        Text("已编辑")
+                            .font(.system(size: 10))
+                            .foregroundColor(colors.textTertiary)
+                    }
                     Spacer(minLength: 0)
                     Text(formatTime(message.createdAt))
                         .font(.system(size: 11))
-                        .foregroundColor(isOut ? colors.textTertiary : colors.textTertiary)
+                        .foregroundColor(colors.textTertiary)
                     if isOut {
                         if message.seq == 0 {
                             Image(systemName: "clock")

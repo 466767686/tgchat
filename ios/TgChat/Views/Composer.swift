@@ -36,6 +36,8 @@ private let emojiList: [String] = [
 struct ChatComposer: View {
     let chatId: String
     @Binding var draft: String
+    @Binding var replyTarget: Message?
+    @Binding var editing: Message?
 
     @EnvironmentObject private var app: AppState
     @Environment(\.colorScheme) private var scheme
@@ -54,6 +56,57 @@ struct ChatComposer: View {
         let c = TgColors(dark: scheme == .dark)
 
         VStack(spacing: 0) {
+            if let editing = editing {
+                HStack(spacing: 10) {
+                    Image(systemName: "pencil")
+                        .foregroundColor(c.accent)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("编辑消息")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(c.accent)
+                        Text(editing.text)
+                            .font(.system(size: 12))
+                            .foregroundColor(c.textSecondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        self.editing = nil
+                        draft = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(c.textTertiary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(c.surfaceAlt)
+            } else if let reply = replyTarget {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrowshape.turn.up.left.fill")
+                        .foregroundColor(c.accent)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(reply.senderName)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(c.accent)
+                        Text(reply.text.isEmpty ? "媒体消息" : reply.text)
+                            .font(.system(size: 12))
+                            .foregroundColor(c.textSecondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        replyTarget = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(c.textTertiary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(c.surfaceAlt)
+            }
+
             if let progress = app.uploadProgress {
                 HStack(spacing: 8) {
                     Text(app.uploadName ?? "上传中")
@@ -208,7 +261,14 @@ struct ChatComposer: View {
                         Button {
                             let text = draft
                             draft = ""
-                            Task { await app.sendMessage(text, chatId: chatId) }
+                            if let editing = editing {
+                                self.editing = nil
+                                Task { await app.editMessage(chatId: chatId, seq: editing.seq, text: text) }
+                            } else {
+                                let reply = replyTarget?.seq
+                                replyTarget = nil
+                                Task { await app.sendMessage(text, chatId: chatId, replyTo: reply) }
+                            }
                         } label: {
                             Image(systemName: "paperplane.fill")
                                 .font(.system(size: 17, weight: .medium))

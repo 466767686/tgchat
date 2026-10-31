@@ -65,6 +65,29 @@ func formatDateHeader(_ millis: Int64) -> String {
     return formatter.string(from: date)
 }
 
+func formattedText(_ text: String) -> AttributedString {
+    var attributed = (try? AttributedString(
+        markdown: text,
+        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    )) ?? AttributedString(text)
+
+    // autolink bare URLs
+    if attributed.runs.isEmpty {
+        return attributed
+    }
+    let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    let full = String(attributed.characters)
+    let nsRange = NSRange(full.startIndex..<full.endIndex, in: full)
+    detector?.enumerateMatches(in: full, options: [], range: nsRange) { result, _, _ in
+        guard let result = result, let url = result.url,
+              let range = Range(result.range, in: full),
+              let attributedRange = Range(range, in: attributed) else { return }
+        attributed[attributedRange].link = url
+        attributed[attributedRange].underlineStyle = .single
+    }
+    return attributed
+}
+
 func isSameDay(_ a: Int64, _ b: Int64) -> Bool {
     let calendar = Calendar.current
     return calendar.isDate(Date(timeIntervalSince1970: Double(a) / 1000), inSameDayAs: Date(timeIntervalSince1970: Double(b) / 1000))

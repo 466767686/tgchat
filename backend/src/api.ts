@@ -90,6 +90,7 @@ async function assertMember(env: Env, chatId: string, userId: string): Promise<v
 }
 
 function mapMessage(row: any) {
+  const deleted = !!row.deleted_at;
   return {
     seq: row.seq,
     id: row.id,
@@ -97,10 +98,21 @@ function mapMessage(row: any) {
     senderId: row.sender_id,
     senderName: row.sender_name,
     senderColor: row.sender_color,
-    text: row.text,
+    text: deleted ? "" : row.text,
     createdAt: row.created_at,
     clientId: row.client_id ?? null,
-    media: row.media_id
+    deleted,
+    editedAt: row.edited_at ?? null,
+    forwardedFrom: row.forwarded_from ?? null,
+    pinned: !!row.pinned,
+    replyTo: row.reply_to_seq
+      ? {
+          seq: row.reply_to_seq,
+          senderName: row.reply_sender_name ?? "",
+          text: row.reply_deleted_at ? "消息已删除" : (row.reply_text ?? ""),
+        }
+      : null,
+    media: !deleted && row.media_id
       ? {
           id: row.media_id,
           kind: row.media_kind,
@@ -113,18 +125,49 @@ function mapMessage(row: any) {
           url: `/api/media/${row.media_id}`,
         }
       : null,
+    reactions: [] as any[],
   };
 }
 
 const MESSAGE_SELECT = `
   SELECT m.seq, m.id, m.chat_id, m.sender_id, m.text, m.created_at, m.client_id, m.media_id,
+         m.reply_to_seq, m.edited_at, m.deleted_at, m.forwarded_from,
          u.display_name AS sender_name, u.avatar_color AS sender_color,
          md.kind AS media_kind, md.mime AS media_mime, md.size AS media_size,
          md.file_name AS media_name, md.width AS media_width, md.height AS media_height,
-         md.duration_ms AS media_duration
+         md.duration_ms AS media_duration,
+         r.sender_id AS reply_sender_id, ru.display_name AS reply_sender_name,
+         r.text AS reply_text, r.deleted_at AS reply_deleted_at,
+         (SELECT 1 FROM pinned_messages p WHERE p.chat_id = m.chat_id AND p.message_seq = m.seq LIMIT 1) AS pinned
   FROM messages m
   JOIN users u ON u.id = m.sender_id
-  LEFT JOIN media md ON md.id = m.media_id`;
+  LEFT JOIN media md ON md.id = m.media_id
+  LEFT JOIN messages r ON r.chat_id = m.chat_id AND r.seq = m.reply_to_seq
+  LEFT JOIN users ru ON ru.id = r.sender_id`;
+
+async function withReactions(env: Env, rows: any[], mapped: any[], viewerId: string) {
+  if (!rows.length) return mapped;
+  const ids = rows.map((row: any) => row.id);
+  const placeholders = ids.map(() => "?").join(",");
+  const result = await env.DB.prepare(
+    `SELECT message_id, emoji, COUNT(*) AS count, MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS mine
+     FROM message_reactions WHERE message_id IN (${placeholders})
+     GROUP BY message_id, emoji ORDER BY MIN(created_at)`,
+  )
+    .bind(viewerId, ...ids)
+    .all<any>();
+
+  const grouped: Record<string, any[]> = {};
+  for (const row of result.results) {
+    (grouped[row.message_id] ??= []).push({
+      emoji: row.emoji,
+      count: row.count,
+      me: !!row.mine,
+    });
+  }
+  for (const message of mapped) message.reactions = grouped[message.id] ?? [];
+  return mapped;
+}
 
 function mapMedia(row: any) {
   if (!row) return null;
@@ -521,7 +564,9 @@ export async function handleRequest(
       )
         .bind(chatId, before > 0 ? before : Number.MAX_SAFE_INTEGER, limit)
         .all<any>();
-      const messages = rows.results.map(mapMessage).reverse();
+      const mapped = rows.results.map(mapMessage);
+      await withReactions(env, rows.results, mapped, me.id);
+      const messages = mapped.reverse();
       return json({ messages, hasMore: rows.results.length === limit });
     }
 
@@ -535,6 +580,16 @@ export async function handleRequest(
       if (rawText.length > 4096) throw new ApiError(400, "消息内容过长", "invalid_input");
       const content = rawText;
       const clientId = typeof body.clientId === "string" ? body.clientId.slice(0, 64) : null;
+      const replyRaw = parseInt(String(body.replyTo ?? ""), 10);
+      const replyTo = Number.isFinite(replyRaw) && replyRaw > 0 ? replyRaw : null;
+      const forwardedFrom = typeof body.forwardedFrom === "string" ? body.forwardedFrom.slice(0, 200) : null;
+
+      if (replyTo) {
+        const target = await env.DB.prepare("SELECT 1 AS x FROM messages WHERE chat_id = ? AND seq = ?")
+          .bind(chatId, replyTo)
+          .first();
+        if (!target) throw new ApiError(400, "被回复的消息不存在", "invalid_input");
+      }
 
       if (mediaId) {
         const media = await env.DB.prepare("SELECT * FROM media WHERE id = ?").bind(mediaId).first<any>();
@@ -554,12 +609,13 @@ export async function handleRequest(
       const id = crypto.randomUUID();
       const now = Date.now();
       await env.DB.prepare(
-        "INSERT INTO messages (id, chat_id, sender_id, text, created_at, client_id, media_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, chat_id, sender_id, text, created_at, client_id, media_id, reply_to_seq, forwarded_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-        .bind(id, chatId, me.id, content, now, clientId, mediaId)
+        .bind(id, chatId, me.id, content, now, clientId, mediaId, replyTo, forwardedFrom)
         .run();
       const row = await env.DB.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).bind(id).first<any>();
       const message = mapMessage(row);
+      await withReactions(env, [row], [message], me.id);
       await env.DB.prepare("UPDATE chat_members SET last_read_seq = MAX(last_read_seq, ?) WHERE chat_id = ? AND user_id = ?")
         .bind(message.seq, chatId, me.id)
         .run();
@@ -588,6 +644,124 @@ export async function handleRequest(
       }
 
       return json({ message }, 201);
+    }
+
+    if ((method === "PATCH" || method === "DELETE") && seg.length === 5 && seg[3] === "messages") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const seq = parseInt(seg[4], 10);
+      if (!Number.isFinite(seq)) throw new ApiError(400, "无效的消息序号", "invalid_input");
+
+      const row = await env.DB.prepare("SELECT * FROM messages WHERE chat_id = ? AND seq = ?")
+        .bind(chatId, seq)
+        .first<any>();
+      if (!row) throw new ApiError(404, "消息不存在", "not_found");
+      if (row.sender_id !== me.id) throw new ApiError(403, "只能操作自己的消息", "forbidden");
+      if (row.deleted_at) throw new ApiError(400, "消息已删除", "invalid_input");
+
+      if (method === "PATCH") {
+        const body = await readBody(request);
+        const content = text(body.text, "消息内容", 1, 4096);
+        await env.DB.prepare("UPDATE messages SET text = ?, edited_at = ? WHERE chat_id = ? AND seq = ?")
+          .bind(content, Date.now(), chatId, seq)
+          .run();
+        const updated = await env.DB.prepare(`${MESSAGE_SELECT} WHERE m.chat_id = ? AND m.seq = ?`)
+          .bind(chatId, seq)
+          .first<any>();
+        const message = mapMessage(updated);
+        await withReactions(env, [updated], [message], me.id);
+        await broadcast(env, ctx, chatId, { type: "edit", chatId, message });
+        return json({ message });
+      }
+
+      await env.DB.prepare("UPDATE messages SET deleted_at = ?, text = '' WHERE chat_id = ? AND seq = ?")
+        .bind(Date.now(), chatId, seq)
+        .run();
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM message_reactions WHERE message_id = ?").bind(row.id),
+        env.DB.prepare("DELETE FROM pinned_messages WHERE chat_id = ? AND message_seq = ?").bind(chatId, seq),
+      ]);
+      await broadcast(env, ctx, chatId, { type: "delete", chatId, seq });
+      return ok({ ok: true, seq });
+    }
+
+    if (method === "POST" && seg.length === 6 && seg[3] === "messages" && seg[5] === "reactions") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const seq = parseInt(seg[4], 10);
+      const target = await env.DB.prepare("SELECT * FROM messages WHERE chat_id = ? AND seq = ?")
+        .bind(chatId, seq)
+        .first<any>();
+      if (!target || target.deleted_at) throw new ApiError(404, "消息不存在", "not_found");
+
+      const body = await readBody(request);
+      const emoji = typeof body.emoji === "string" ? body.emoji.trim().slice(0, 16) : "";
+      if (!emoji) throw new ApiError(400, "缺少 emoji", "invalid_input");
+
+      const existing = await env.DB.prepare(
+        "SELECT 1 AS x FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?",
+      )
+        .bind(target.id, me.id, emoji)
+        .first();
+
+      if (existing) {
+        await env.DB.prepare("DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?")
+          .bind(target.id, me.id, emoji)
+          .run();
+      } else {
+        await env.DB.prepare(
+          "INSERT INTO message_reactions (message_id, chat_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+          .bind(target.id, chatId, me.id, emoji, Date.now())
+          .run();
+      }
+
+      const result = await env.DB.prepare(
+        "SELECT emoji, COUNT(*) AS count, MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS mine FROM message_reactions WHERE message_id = ? GROUP BY emoji",
+      )
+        .bind(me.id, target.id)
+        .all<any>();
+      const reactions = result.results.map((item: any) => ({ emoji: item.emoji, count: item.count, me: !!item.mine }));
+
+      await broadcast(env, ctx, chatId, { type: "reaction", chatId, seq, messageId: target.id, reactions });
+      return json({ reactions });
+    }
+
+    if (method === "POST" && seg.length === 4 && seg[3] === "pin") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const body = await readBody(request);
+      const seq = parseInt(String(body.seq ?? ""), 10);
+      if (!Number.isFinite(seq)) throw new ApiError(400, "缺少 seq", "invalid_input");
+      if (body.pinned) {
+        await env.DB.prepare(
+          "INSERT OR IGNORE INTO pinned_messages (chat_id, message_seq, pinned_by, pinned_at) VALUES (?, ?, ?, ?)",
+        )
+          .bind(chatId, seq, me.id, Date.now())
+          .run();
+      } else {
+        await env.DB.prepare("DELETE FROM pinned_messages WHERE chat_id = ? AND message_seq = ?")
+          .bind(chatId, seq)
+          .run();
+      }
+      await broadcast(env, ctx, chatId, { type: "pin", chatId, seq, pinned: !!body.pinned });
+      return json({ pinned: !!body.pinned });
+    }
+
+    if (method === "GET" && seg.length === 4 && seg[3] === "search") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const query = (new URL(request.url).searchParams.get("q") ?? "").trim();
+      if (!query) return json({ messages: [] });
+      const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      const rows = await env.DB.prepare(
+        `${MESSAGE_SELECT} WHERE m.chat_id = ? AND m.deleted_at IS NULL AND m.text LIKE ? ESCAPE '\\' ORDER BY m.seq DESC LIMIT 50`,
+      )
+        .bind(chatId, `%${escaped}%`)
+        .all<any>();
+      const mapped = rows.results.map(mapMessage);
+      await withReactions(env, rows.results, mapped, me.id);
+      return json({ messages: mapped });
     }
 
     if (method === "POST" && seg.length === 4 && seg[3] === "read") {

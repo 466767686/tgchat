@@ -96,10 +96,52 @@ final class APIClient {
         try await request("/api/chats/\(chatId)/messages?before=\(before)&limit=\(limit)")
     }
 
-    func sendMessage(chatId: String, text: String, clientId: String, mediaId: String? = nil) async throws -> MessageResponse {
+    func sendMessage(
+        chatId: String,
+        text: String,
+        clientId: String,
+        mediaId: String? = nil,
+        replyTo: Int64? = nil,
+        forwardedFrom: String? = nil
+    ) async throws -> MessageResponse {
         var body: [String: Any] = ["text": text, "clientId": clientId]
         if let mediaId = mediaId { body["mediaId"] = mediaId }
+        if let replyTo = replyTo { body["replyTo"] = Int(replyTo) }
+        if let forwardedFrom = forwardedFrom { body["forwardedFrom"] = forwardedFrom }
         return try await request("/api/chats/\(chatId)/messages", method: "POST", body: body)
+    }
+
+    func editMessage(chatId: String, seq: Int64, text: String) async throws -> MessageResponse {
+        try await request(
+            "/api/chats/\(chatId)/messages/\(seq)",
+            method: "PATCH",
+            body: ["text": text]
+        )
+    }
+
+    func deleteMessage(chatId: String, seq: Int64) async throws {
+        let _: SimpleResponse = try await request("/api/chats/\(chatId)/messages/\(seq)", method: "DELETE")
+    }
+
+    func toggleReaction(chatId: String, seq: Int64, emoji: String) async throws -> ReactionsResponse {
+        try await request(
+            "/api/chats/\(chatId)/messages/\(seq)/reactions",
+            method: "POST",
+            body: ["emoji": emoji]
+        )
+    }
+
+    func pinMessage(chatId: String, seq: Int64, pinned: Bool) async throws {
+        let _: SimpleResponse = try await request(
+            "/api/chats/\(chatId)/pin",
+            method: "POST",
+            body: ["seq": Int(seq), "pinned": pinned]
+        )
+    }
+
+    func searchMessages(chatId: String, query: String) async throws -> MessagesResponse {
+        let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return try await request("/api/chats/\(chatId)/search?q=\(escaped)")
     }
 
     func mediaURL(_ path: String) -> URL? {

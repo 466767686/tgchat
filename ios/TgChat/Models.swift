@@ -52,6 +52,18 @@ struct Media: Codable, Identifiable, Hashable {
     }
 }
 
+struct ReplyPreview: Codable, Hashable {
+    let seq: Int64
+    let senderName: String
+    let text: String
+}
+
+struct Reaction: Codable, Hashable {
+    let emoji: String
+    let count: Int
+    let me: Bool
+}
+
 struct Message: Codable, Identifiable, Hashable {
     let seq: Int64
     let id: String
@@ -63,6 +75,12 @@ struct Message: Codable, Identifiable, Hashable {
     let createdAt: Int64
     let clientId: String?
     var media: Media? = nil
+    var deleted: Bool = false
+    var editedAt: Int64? = nil
+    var forwardedFrom: String? = nil
+    var pinned: Bool = false
+    var replyTo: ReplyPreview? = nil
+    var reactions: [Reaction] = []
 }
 
 struct Chat: Codable, Identifiable, Hashable {
@@ -111,6 +129,7 @@ struct MeResponse: Codable { let user: User }
 struct ChatsResponse: Codable { let chats: [Chat] }
 struct MessagesResponse: Codable { let messages: [Message]; let hasMore: Bool }
 struct MessageResponse: Codable { let message: Message; let duplicate: Bool? }
+struct ReactionsResponse: Codable { let reactions: [Reaction] }
 struct UsersResponse: Codable { let users: [User] }
 struct ChatResponse: Codable { let chat: Chat; let created: Bool? }
 struct SimpleResponse: Codable { let ok: Bool? }

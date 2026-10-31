@@ -7,6 +7,10 @@ final class RealtimeClient {
     var onRead: ((Int64) -> Void)?
     var onState: ((Bool) -> Void)?
     var onClosed: (() -> Void)?
+    var onEdit: ((Message) -> Void)?
+    var onDelete: ((Int64) -> Void)?
+    var onReaction: ((Int64, [Reaction]) -> Void)?
+    var onPin: ((Int64, Bool) -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private let session = URLSession(configuration: .default)
@@ -86,6 +90,24 @@ final class RealtimeClient {
             onTyping?(object["name"] as? String ?? "")
         case "read":
             onRead?((object["seq"] as? NSNumber)?.int64Value ?? 0)
+        case "edit":
+            if let payload = object["message"],
+               let data = try? JSONSerialization.data(withJSONObject: payload),
+               let message = try? JSONDecoder().decode(Message.self, from: data) {
+                onEdit?(message)
+            }
+        case "delete":
+            onDelete?((object["seq"] as? NSNumber)?.int64Value ?? 0)
+        case "reaction":
+            let seq = (object["seq"] as? NSNumber)?.int64Value ?? 0
+            var reactions: [Reaction] = []
+            if let raw = object["reactions"],
+               let data = try? JSONSerialization.data(withJSONObject: raw) {
+                reactions = (try? JSONDecoder().decode([Reaction].self, from: data)) ?? []
+            }
+            onReaction?(seq, reactions)
+        case "pin":
+            onPin?((object["seq"] as? NSNumber)?.int64Value ?? 0, (object["pinned"] as? Bool) ?? false)
         default:
             break
         }

@@ -45,7 +45,11 @@ CREATE TABLE IF NOT EXISTS messages (
   text       TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   client_id  TEXT,
-  media_id   TEXT
+  media_id   TEXT,
+  reply_to_seq    INTEGER,
+  edited_at       INTEGER,
+  deleted_at      INTEGER,
+  forwarded_from  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(media_id);
 
@@ -64,4 +68,22 @@ CREATE TABLE IF NOT EXISTS media (
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_media_chat ON media(chat_id);
+
+CREATE TABLE IF NOT EXISTS message_reactions (
+  message_id TEXT NOT NULL,
+  chat_id    TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  emoji      TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (message_id, user_id, emoji)
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_chat ON message_reactions(chat_id);
+
+CREATE TABLE IF NOT EXISTS pinned_messages (
+  chat_id    TEXT NOT NULL,
+  message_seq INTEGER NOT NULL,
+  pinned_by  TEXT NOT NULL,
+  pinned_at  INTEGER NOT NULL,
+  PRIMARY KEY (chat_id, message_seq)
+);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_seq ON messages(chat_id, seq);

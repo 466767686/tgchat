@@ -38,6 +38,8 @@ final class AppState: ObservableObject {
     @Published var uploadProgress: Double? = nil
     @Published var uploadName: String? = nil
     @Published var uploadFailed = false
+    @Published var hasMore: [String: Bool] = [:]
+    @Published var loadingOlder = false
 
     @Published var usersDirectory: [User] = []
     @Published var adminUsers: [User] = []
@@ -236,6 +238,7 @@ final class AppState: ObservableObject {
         do {
             let response = try await api.messages(chatId: chatId)
             messages[chatId] = merge(messages[chatId] ?? [], response.messages)
+            hasMore[chatId] = response.hasMore
             if let last = messages[chatId]?.last(where: { $0.seq > 0 }) {
                 markRead(chatId, seq: last.seq)
             }
@@ -262,10 +265,14 @@ final class AppState: ObservableObject {
 
     // MARK: - Messages
 
-    func sendMessage(_ text: String, chatId: String) async {
+    func sendMessage(_ text: String, chatId: String, replyTo: Int64? = nil, forwardedFrom: String? = nil) async {
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty, let me = me else { return }
         let clientId = UUID().uuidString
+        var localReply: ReplyPreview? = nil
+        if let replyTo = replyTo, let target = messages[chatId]?.first(where: { $0.seq == replyTo }) {
+            localReply = ReplyPreview(seq: replyTo, senderName: target.senderName, text: target.text)
+        }
         let local = Message(
             seq: 0,
             id: "local-\(clientId)",
@@ -275,7 +282,9 @@ final class AppState: ObservableObject {
             senderColor: me.avatarColor,
             text: content,
             createdAt: Int64(Date().timeIntervalSince1970 * 1000),
-            clientId: clientId
+            clientId: clientId,
+            forwardedFrom: forwardedFrom,
+            replyTo: localReply
         )
         messages[chatId] = (messages[chatId] ?? []) + [local]
         do {
@@ -289,6 +298,88 @@ final class AppState: ObservableObject {
             toast = error.localizedDescription
             messages[chatId]?.removeAll { $0.clientId == clientId && $0.seq == 0 }
         }
+    }
+
+    // MARK: - Message interactions
+
+    func editMessage(chatId: String, seq: Int64, text: String) async {
+        let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        do {
+            let response = try await api.editMessage(chatId: chatId, seq: seq, text: content)
+            replaceMessage(chatId: chatId, message: response.message)
+            await loadChats(silent: true)
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func deleteMessage(chatId: String, seq: Int64) async {
+        do {
+            try await api.deleteMessage(chatId: chatId, seq: seq)
+            if var list = messages[chatId], let index = list.firstIndex(where: { $0.seq == seq }) {
+                list[index].deleted = true
+                list[index].text = ""
+                list[index].media = nil
+                messages[chatId] = list
+            }
+            await loadChats(silent: true)
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func toggleReaction(chatId: String, seq: Int64, emoji: String) async {
+        do {
+            let response = try await api.toggleReaction(chatId: chatId, seq: seq, emoji: emoji)
+            if var list = messages[chatId], let index = list.firstIndex(where: { $0.seq == seq }) {
+                list[index].reactions = response.reactions
+                messages[chatId] = list
+            }
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func pinMessage(chatId: String, seq: Int64, pinned: Bool) async {
+        do {
+            try await api.pinMessage(chatId: chatId, seq: seq, pinned: pinned)
+            if var list = messages[chatId], let index = list.firstIndex(where: { $0.seq == seq }) {
+                list[index].pinned = pinned
+                messages[chatId] = list
+            }
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func searchMessages(chatId: String, query: String) async -> [Message] {
+        do {
+            return try await api.searchMessages(chatId: chatId, query: query).messages
+        } catch {
+            toast = error.localizedDescription
+            return []
+        }
+    }
+
+    func loadOlder(chatId: String) async {
+        guard !loadingOlder, hasMore[chatId] != false else { return }
+        guard let oldest = messages[chatId]?.first(where: { $0.seq > 0 })?.seq else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        if let response = try? await api.messages(chatId: chatId, before: oldest, limit: 50) {
+            messages[chatId] = merge(messages[chatId] ?? [], response.messages)
+            hasMore[chatId] = response.hasMore
+        }
+    }
+
+    private func replaceMessage(chatId: String, message: Message) {
+        guard var list = messages[chatId], let index = list.firstIndex(where: { $0.seq == message.seq }) else {
+            messages[chatId] = merge(messages[chatId] ?? [], [message])
+            return
+        }
+        list[index] = message
+        messages[chatId] = list
     }
 
     func sendTyping() {
@@ -384,6 +475,37 @@ final class AppState: ObservableObject {
                     lastMessage: chat.lastMessage,
                     members: chat.members
                 )
+            }
+        }
+        realtime.onEdit = { [weak self] message in
+            Task { @MainActor in
+                self?.replaceMessage(chatId: chatId, message: message)
+            }
+        }
+        realtime.onDelete = { [weak self] seq in
+            Task { @MainActor in
+                guard let self = self, var list = self.messages[chatId],
+                      let index = list.firstIndex(where: { $0.seq == seq }) else { return }
+                list[index].deleted = true
+                list[index].text = ""
+                list[index].media = nil
+                self.messages[chatId] = list
+            }
+        }
+        realtime.onReaction = { [weak self] seq, reactions in
+            Task { @MainActor in
+                guard let self = self, var list = self.messages[chatId],
+                      let index = list.firstIndex(where: { $0.seq == seq }) else { return }
+                list[index].reactions = reactions
+                self.messages[chatId] = list
+            }
+        }
+        realtime.onPin = { [weak self] seq, pinned in
+            Task { @MainActor in
+                guard let self = self, var list = self.messages[chatId],
+                      let index = list.firstIndex(where: { $0.seq == seq }) else { return }
+                list[index].pinned = pinned
+                self.messages[chatId] = list
             }
         }
         realtime.connect(baseURL: baseURL, chatId: chatId, token: token)
