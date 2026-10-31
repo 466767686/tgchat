@@ -1,0 +1,159 @@
+#!/usr/bin/env node
+/**
+ * End-to-end smoke test against a running backend.
+ *
+ *   BASE=http://127.0.0.1:8787 ADMIN_USERNAME=admin ADMIN_PASSWORD=admin12345 \
+ *     node scripts/smoke-test.mjs
+ */
+const BASE = (process.env.BASE ?? "http://127.0.0.1:8787").replace(/\/$/, "");
+const ADMIN_USER = process.env.ADMIN_USERNAME ?? "admin";
+const ADMIN_PASS = process.env.ADMIN_PASSWORD ?? "admin12345";
+
+let passed = 0;
+let failed = 0;
+
+function check(condition, label, extra = "") {
+  if (condition) {
+    passed++;
+    console.log(`  ✅ ${label}`);
+  } else {
+    failed++;
+    console.log(`  ❌ ${label}${extra ? ` — ${extra}` : ""}`);
+  }
+}
+
+async function api(path, { method = "GET", token, body } = {}) {
+  const headers = { accept: "application/json" };
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (token) headers.authorization = `Bearer ${token}`;
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  return { status: response.status, json, text };
+}
+
+async function main() {
+  console.log(`\nSmoke test → ${BASE}\n`);
+
+  const health = await api("/api/health");
+  check(health.status === 200 && health.json?.ok === true, "健康检查");
+
+  const login = await api("/api/auth/login", {
+    method: "POST",
+    body: { username: ADMIN_USER, password: ADMIN_PASS },
+  });
+  check(login.status === 200 && !!login.json?.token, "管理员登录", login.text);
+  const adminToken = login.json?.token;
+
+  const badLogin = await api("/api/auth/login", {
+    method: "POST",
+    body: { username: ADMIN_USER, password: "definitely-wrong" },
+  });
+  check(badLogin.status === 401, "错误密码返回 401");
+
+  const suffix = Date.now().toString(36).slice(-6);
+  const username = `smoke_${suffix}`;
+  const password = "smoke12345";
+  const created = await api("/api/admin/users", {
+    method: "POST",
+    token: adminToken,
+    body: { username, password, displayName: "Smoke Test" },
+  });
+  check(created.status === 201 && created.json?.user?.id, "管理员创建账号", created.text);
+  const otherId = created.json?.user?.id;
+
+  const userLogin = await api("/api/auth/login", {
+    method: "POST",
+    body: { username, password },
+  });
+  check(userLogin.status === 200 && !!userLogin.json?.token, "新账号登录");
+  const userToken = userLogin.json?.token;
+  const userId = userLogin.json?.user?.id;
+
+  const nonAdmin = await api("/api/admin/users", {
+    method: "POST",
+    token: userToken,
+    body: { username: "nope", password: "nope12345" },
+  });
+  check(nonAdmin.status === 403, "普通用户不能调用管理接口");
+
+  const anonymous = await api("/api/me");
+  check(anonymous.status === 401, "未携带 token 返回 401");
+
+  const chats = await api("/api/chats", { token: userToken });
+  check(chats.status === 200, "新账号会话列表");
+  const chat = chats.json?.chats?.find((c) => c.members.some((m) => m.id !== userId));
+  check(!!chat, "建号时自动创建与管理员的会话");
+
+  const text = `你好，这是冒烟测试 ${suffix}`;
+  const sent = await api(`/api/chats/${chat.id}/messages`, {
+    method: "POST",
+    token: userToken,
+    body: { text, clientId: `smoke-${suffix}` },
+  });
+  check(sent.status === 201 && sent.json?.message?.seq > 0, "发送消息落库", sent.text);
+  const seq = sent.json?.message?.seq;
+
+  const duplicate = await api(`/api/chats/${chat.id}/messages`, {
+    method: "POST",
+    token: userToken,
+    body: { text, clientId: `smoke-${suffix}` },
+  });
+  check(
+    duplicate.status === 200 && duplicate.json?.duplicate === true && duplicate.json?.message?.seq === seq,
+    "同一 clientId 幂等，不产生重复消息",
+  );
+
+  const adminChats = await api("/api/chats", { token: adminToken });
+  const adminChat = adminChats.json?.chats?.find((c) => c.id === chat.id);
+  check((adminChat?.unread ?? 0) >= 1, "管理员侧未读数增加", JSON.stringify(adminChat?.unread));
+  check(adminChat?.lastMessage?.text === text, "会话最后一条消息正确");
+
+  const messages = await api(`/api/chats/${chat.id}/messages?limit=50`, { token: adminToken });
+  const found = messages.json?.messages?.some((m) => m.seq === seq && m.text === text);
+  check(found, "对方能拉到这条消息");
+
+  const read = await api(`/api/chats/${chat.id}/read`, {
+    method: "POST",
+    token: adminToken,
+    body: { seq },
+  });
+  check(read.status === 200, "上报已读游标");
+
+  const afterRead = await api("/api/chats", { token: adminToken });
+  const readChat = afterRead.json?.chats?.find((c) => c.id === chat.id);
+  check((readChat?.unread ?? 0) === 0, "已读后未读数归零");
+  check((readChat?.lastReadSeq ?? 0) >= seq, "已读游标已推进");
+
+  const notMember = await api(`/api/chats/${chat.id}/messages`, {
+    method: "POST",
+    token: adminToken,
+    body: { text: "x", clientId: "x" },
+  });
+  check(notMember.status === 201, "管理员也是该会话成员，可发言");
+
+  const wsNoUpgrade = await api(`/api/ws?chat=${chat.id}&token=${userToken}`);
+  check(wsNoUpgrade.status === 426, "非 WebSocket 请求被拒绝（426）");
+
+  const wsBadToken = await api(`/api/ws?chat=${chat.id}&token=bad`, {
+    headers: { Upgrade: "websocket" },
+  });
+  check(wsBadToken.status === 401, "WebSocket 无效 token 返回 401");
+
+  console.log(`\n结果：${passed} 通过，${failed} 失败\n`);
+  process.exit(failed === 0 ? 0 : 1);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

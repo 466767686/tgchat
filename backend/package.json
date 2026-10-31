@@ -1,0 +1,21 @@
+{
+  "name": "tgchat-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram-style chat backend on Cloudflare Workers + D1 + Durable Objects",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:init": "wrangler d1 execute tgchat --remote --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute tgchat --local --file=./schema.sql",
+    "user:create": "node scripts/create-user.mjs",
+    "bootstrap": "node scripts/bootstrap.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261023.1",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.156.0"
+  }
+}

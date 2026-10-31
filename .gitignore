@@ -1,0 +1,30 @@
+# Node
+node_modules/
+.local/
+.dev.vars
+*.log
+.cf-token.json
+.cf-oauth-state.json
+
+# Wrangler
+.wrangler/
+backend/dist/
+
+# iOS
+ios/build/
+ios/TelegramClone.xcodeproj/
+ios/*.xcworkspace/
+DerivedData/
+
+# Android / Gradle
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.cxx/
+
+# OS
+.DS_Store

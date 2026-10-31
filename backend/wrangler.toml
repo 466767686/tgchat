@@ -1,0 +1,28 @@
+# Cloudflare Worker configuration
+# After `npx wrangler d1 create tgchat`, put the returned database_id below
+# (or just run `npm run bootstrap`, which fills it in automatically).
+
+name = "tgchat-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Non-secret configuration. Change these in the dashboard or here.
+[vars]
+# How long a login token stays valid.
+SESSION_TTL_DAYS = "30"
+# PBKDF2 iterations used for password hashing (stored hashes remember their own
+# iteration count, so this only affects newly created/reset passwords).
+PBKDF2_ITERATIONS = "25000"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tgchat"
+database_id = "66bd610a-f6ed-4189-8812-08d441a487e4"
+
+[[durable_objects.bindings]]
+name = "CHAT_HUB"
+class_name = "ChatHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatHub"]

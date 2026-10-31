@@ -1,0 +1,71 @@
+import SwiftUI
+
+extension Color {
+    init(hex: String) {
+        var value: UInt64 = 0
+        let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        Scanner(string: cleaned).scanHexInt64(&value)
+        let r = Double((value >> 16) & 0xFF) / 255
+        let g = Double((value >> 8) & 0xFF) / 255
+        let b = Double(value & 0xFF) / 255
+        self.init(.sRGB, red: r, green: g, blue: b, opacity: 1)
+    }
+}
+
+struct TgColors {
+    let dark: Bool
+
+    var accent: Color { Color(hex: dark ? "#6AB3F3" : "#3390EC") }
+    var background: Color { Color(hex: dark ? "#0E1621" : "#FFFFFF") }
+    var surface: Color { Color(hex: dark ? "#17212B" : "#FFFFFF") }
+    var surfaceAlt: Color { Color(hex: dark ? "#232E3C" : "#F1F3F6") }
+    var textPrimary: Color { Color(hex: dark ? "#F5F7FA" : "#0F1419") }
+    var textSecondary: Color { Color(hex: dark ? "#8A9AA8" : "#707579") }
+    var textTertiary: Color { Color(hex: dark ? "#6D7F8E" : "#8E9299") }
+    var divider: Color { Color(hex: dark ? "#1C2733" : "#E9EBEE") }
+    var bubbleIn: Color { Color(hex: dark ? "#182533" : "#FFFFFF") }
+    var bubbleOut: Color { Color(hex: dark ? "#2B5278" : "#EFFDDE") }
+    var bubbleInText: Color { Color(hex: dark ? "#F2F5F8" : "#0F1419") }
+    var bubbleOutText: Color { Color(hex: dark ? "#FFFFFF" : "#0F1419") }
+    var chatBgTop: Color { Color(hex: dark ? "#0B131C" : "#D7E3EE") }
+    var chatBgBottom: Color { Color(hex: dark ? "#15212D" : "#EDF2F7") }
+    var header: Color { Color(hex: dark ? "#17212B" : "#FFFFFF") }
+    var danger: Color { Color(hex: "#E0493E") }
+    var dateChip: Color { Color.black.opacity(0.45) }
+}
+
+func formatTime(_ millis: Int64) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm"
+    return formatter.string(from: Date(timeIntervalSince1970: Double(millis) / 1000))
+}
+
+func formatListTime(_ millis: Int64) -> String {
+    guard millis > 0 else { return "" }
+    let date = Date(timeIntervalSince1970: Double(millis) / 1000)
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) {
+        return formatTime(millis)
+    }
+    if calendar.isDateInYesterday(date) {
+        return "昨天"
+    }
+    let formatter = DateFormatter()
+    formatter.dateFormat = "dd.MM.yy"
+    return formatter.string(from: date)
+}
+
+func formatDateHeader(_ millis: Int64) -> String {
+    let date = Date(timeIntervalSince1970: Double(millis) / 1000)
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) { return "今天" }
+    if calendar.isDateInYesterday(date) { return "昨天" }
+    let formatter = DateFormatter()
+    formatter.dateFormat = "M月d日"
+    return formatter.string(from: date)
+}
+
+func isSameDay(_ a: Int64, _ b: Int64) -> Bool {
+    let calendar = Calendar.current
+    return calendar.isDate(Date(timeIntervalSince1970: Double(a) / 1000), inSameDayAs: Date(timeIntervalSince1970: Double(b) / 1000))
+}
