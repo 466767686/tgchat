@@ -6,6 +6,7 @@ final class RealtimeClient {
     var onTyping: ((String) -> Void)?
     var onRead: ((Int64) -> Void)?
     var onState: ((Bool) -> Void)?
+    var onClosed: (() -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private let session = URLSession(configuration: .default)
@@ -64,6 +65,7 @@ final class RealtimeClient {
                 self.receive()
             case .failure:
                 self.onState?(false)
+                self.onClosed?()
             }
         }
     }
