@@ -88,7 +88,7 @@ struct MessageBubbleView: View {
                 if let reply = message.replyTo {
                     HStack(spacing: 6) {
                         Capsule()
-                            .fill(parseHexColor(message.senderColor, colors.accent))
+                            .fill(Color(hex: message.senderColor))
                             .frame(width: 2.5)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(reply.senderName)

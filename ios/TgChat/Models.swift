@@ -71,7 +71,7 @@ struct Message: Codable, Identifiable, Hashable {
     let senderId: String
     let senderName: String
     let senderColor: String
-    let text: String
+    var text: String
     let createdAt: Int64
     let clientId: String?
     var media: Media? = nil
