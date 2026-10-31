@@ -1,6 +1,7 @@
 package com.tgchat.app.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -14,6 +15,8 @@ data class StoredSession(
     val userJson: String? = null,
     val baseUrl: String? = null,
     val theme: String = "system",
+    val disguise: Boolean = true,
+    val unlockPin: String = "1234",
 )
 
 class SessionStore(private val context: Context) {
@@ -23,6 +26,8 @@ class SessionStore(private val context: Context) {
         val user = stringPreferencesKey("user_json")
         val baseUrl = stringPreferencesKey("base_url")
         val theme = stringPreferencesKey("theme")
+        val disguise = booleanPreferencesKey("disguise")
+        val unlockPin = stringPreferencesKey("unlock_pin")
     }
 
     val session: Flow<StoredSession> = context.sessionDataStore.data.map { prefs ->
@@ -31,6 +36,8 @@ class SessionStore(private val context: Context) {
             userJson = prefs[Keys.user],
             baseUrl = prefs[Keys.baseUrl],
             theme = prefs[Keys.theme] ?: "system",
+            disguise = prefs[Keys.disguise] ?: true,
+            unlockPin = prefs[Keys.unlockPin] ?: "1234",
         )
     }
 
@@ -47,6 +54,14 @@ class SessionStore(private val context: Context) {
 
     suspend fun saveTheme(mode: String) {
         context.sessionDataStore.edit { it[Keys.theme] = mode }
+    }
+
+    suspend fun saveDisguise(enabled: Boolean) {
+        context.sessionDataStore.edit { it[Keys.disguise] = enabled }
+    }
+
+    suspend fun saveUnlockPin(pin: String) {
+        context.sessionDataStore.edit { it[Keys.unlockPin] = pin }
     }
 
     suspend fun clearSession() {

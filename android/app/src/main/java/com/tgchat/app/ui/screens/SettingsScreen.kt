@@ -18,7 +18,9 @@ import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -33,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgchat.app.AppViewModel
@@ -42,6 +45,7 @@ import com.tgchat.app.ui.components.ConfirmDialog
 import com.tgchat.app.ui.components.ScreenHeader
 import com.tgchat.app.ui.components.ServerUrlDialog
 import com.tgchat.app.ui.components.SectionDivider
+import com.tgchat.app.ui.components.TgTextField
 import com.tgchat.app.ui.theme.LocalTgColors
 import com.tgchat.app.ui.theme.TelegramBlue
 
@@ -49,6 +53,8 @@ import com.tgchat.app.ui.theme.TelegramBlue
 fun SettingsScreen(vm: AppViewModel) {
     val c = LocalTgColors.current
     var showTheme by remember { mutableStateOf(false) }
+    var showPin by remember { mutableStateOf(false) }
+    var pinDraft by remember { mutableStateOf("") }
     var showServer by remember { mutableStateOf(false) }
     var showLogout by remember { mutableStateOf(false) }
 
@@ -120,6 +126,30 @@ fun SettingsScreen(vm: AppViewModel) {
         SectionDivider()
 
         SettingsRow(
+            icon = Icons.Rounded.VisibilityOff,
+            title = "计算器伪装",
+            value = if (vm.disguiseEnabled) "已开启" else "已关闭",
+            onClick = { vm.setDisguise(!vm.disguiseEnabled) },
+        )
+        if (vm.disguiseEnabled) {
+            SettingsRow(
+                icon = Icons.Rounded.Lock,
+                title = "修改解锁密码",
+                value = "••••",
+                onClick = { pinDraft = ""; showPin = true },
+            )
+            SettingsRow(
+                icon = Icons.Rounded.Lock,
+                title = "立即锁定",
+                value = "",
+                onClick = { vm.lock() },
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        SectionDivider()
+
+        SettingsRow(
             icon = Icons.Rounded.Logout,
             title = "退出登录",
             value = "",
@@ -134,6 +164,43 @@ fun SettingsScreen(vm: AppViewModel) {
             fontSize = 11.sp,
             modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
+
+    if (showPin) {
+        AlertDialog(
+            onDismissRequest = { showPin = false },
+            containerColor = c.surface,
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("修改解锁密码", color = c.textPrimary, fontSize = 19.sp, fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column {
+                    Text(
+                        "4-8 位数字。在计算器上输入该密码后按 = 进入聊天。",
+                        color = c.textSecondary,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    TgTextField(
+                        value = pinDraft,
+                        onValueChange = { pinDraft = it },
+                        placeholder = "新密码",
+                        isPassword = true,
+                        keyboardType = KeyboardType.Number,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.changeUnlockPin(pinDraft)
+                    showPin = false
+                }) {
+                    Text("保存", color = c.accent, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPin = false }) { Text("取消", color = c.textSecondary) }
+            },
         )
     }
 

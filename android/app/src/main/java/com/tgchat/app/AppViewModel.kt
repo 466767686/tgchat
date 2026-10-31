@@ -84,6 +84,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     var themeMode by mutableStateOf(ThemeMode.SYSTEM)
         private set
+    var disguiseEnabled by mutableStateOf(true)
+        private set
+    var unlockPin by mutableStateOf("1234")
+        private set
+    var locked by mutableStateOf(true)
+        private set
     var baseUrl by mutableStateOf(ApiClient.normalize(BuildConfig.DEFAULT_BASE_URL))
         private set
     var token by mutableStateOf<String?>(null)
@@ -147,6 +153,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 baseUrl = ApiClient.normalize(stored.baseUrl ?: BuildConfig.DEFAULT_BASE_URL)
                 api.baseUrl = baseUrl
                 themeMode = ThemeMode.from(stored.theme)
+                disguiseEnabled = stored.disguise
+                unlockPin = stored.unlockPin
+                locked = disguiseEnabled
 
                 val savedToken = stored.token
                 if (!savedToken.isNullOrBlank()) {
@@ -253,6 +262,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setTheme(mode: ThemeMode) {
         themeMode = mode
         scope.launch { store.saveTheme(mode.storageKey()) }
+    }
+
+    fun unlock() {
+        locked = false
+    }
+
+    fun lock() {
+        if (disguiseEnabled) locked = true
+    }
+
+    fun setDisguise(enabled: Boolean) {
+        disguiseEnabled = enabled
+        if (enabled) locked = true
+        scope.launch { store.saveDisguise(enabled) }
+    }
+
+    fun changeUnlockPin(pin: String) {
+        if (pin.length < 4) return
+        unlockPin = pin
+        scope.launch { store.saveUnlockPin(pin) }
     }
 
     fun clearToast() {

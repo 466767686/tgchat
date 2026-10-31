@@ -23,14 +23,14 @@ object Notifications {
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_MESSAGES, "消息通知", NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(CHANNEL_MESSAGES, "应用通知", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "新消息提醒"
                 enableVibration(true)
             },
         )
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_SERVICE, "后台连接", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "保持消息连接的常驻通知"
+            NotificationChannel(CHANNEL_SERVICE, "后台运行", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "保持后台运行"
                 setShowBadge(false)
             },
         )
@@ -39,8 +39,8 @@ object Notifications {
     fun serviceNotification(context: Context): Notification =
         NotificationCompat.Builder(context, CHANNEL_SERVICE)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("消息服务")
-            .setContentText("保持连接中")
+            .setContentTitle("计算器")
+            .setContentText("保持后台运行")
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
