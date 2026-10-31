@@ -1,4 +1,4 @@
-name: diag
+name: diag2
 on:
   workflow_dispatch:
   push:
@@ -6,11 +6,15 @@ on:
       - ".github/workflows/diag.yml"
 
 jobs:
-  ubuntu:
-    runs-on: ubuntu-latest
+  m13:
+    runs-on: macos-13
     steps:
-      - run: echo "ubuntu works"
-  macos:
+      - run: sw_vers
+  m14:
     runs-on: macos-14
     steps:
-      - run: uname -a && sw_vers
+      - run: sw_vers
+  mlatest:
+    runs-on: macos-latest
+    steps:
+      - run: sw_vers
