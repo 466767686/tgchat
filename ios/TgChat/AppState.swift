@@ -396,6 +396,58 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Privacy & profile
+
+    func updateProfile(_ fields: [String: Any]) async -> Bool {
+        do {
+            let user = try await api.patchProfile(fields).user
+            me = user
+            return true
+        } catch {
+            toast = error.localizedDescription
+            return false
+        }
+    }
+
+    func refreshMe() async {
+        if let user = try? await api.me().user {
+            me = user
+        }
+    }
+
+    func loadSessions() async -> [SessionInfo] {
+        (try? await api.sessions().sessions) ?? []
+    }
+
+    func revokeSession(_ id: String) async {
+        try? await api.revokeSession(id: id)
+    }
+
+    func revokeOtherSessions() async {
+        try? await api.revokeOtherSessions()
+    }
+
+    func loadBlocks() async -> [User] {
+        (try? await api.blocks().users) ?? []
+    }
+
+    func blockUser(_ userId: String) async {
+        do {
+            try await api.setBlock(userId: userId, blocked: true)
+            toast = "已加入黑名单"
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func unblockUser(_ userId: String) async {
+        do {
+            try await api.setBlock(userId: userId, blocked: false)
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
     // MARK: - Chat management
 
     func loadFolders() async {

@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL,
   avatar_color TEXT NOT NULL DEFAULT '#3390EC',
   role         TEXT NOT NULL DEFAULT 'user',   -- 'admin' | 'user'
+  bio          TEXT,
+  last_seen_visibility TEXT NOT NULL DEFAULT 'everyone',
+  read_receipts INTEGER NOT NULL DEFAULT 1,
   created_at   INTEGER NOT NULL,
   last_seen_at INTEGER
 );
@@ -16,7 +19,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  device_name TEXT,
+  platform    TEXT,
+  last_active_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
@@ -34,6 +40,7 @@ CREATE TABLE IF NOT EXISTS chats (
   username       TEXT,
   is_public      INTEGER NOT NULL DEFAULT 0,
   discussion_chat_id TEXT,
+  auto_delete_seconds INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   created_by TEXT
 );
@@ -114,6 +121,13 @@ CREATE TABLE IF NOT EXISTS chat_join_requests (
   user_id    TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   status     TEXT NOT NULL DEFAULT 'pending'
+);
+
+CREATE TABLE IF NOT EXISTS blocks (
+  blocker_id TEXT NOT NULL,
+  blocked_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (blocker_id, blocked_id)
 );
 
 CREATE TABLE IF NOT EXISTS message_views (

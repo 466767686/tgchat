@@ -17,6 +17,9 @@ struct User: Codable, Identifiable, Hashable {
     var lastSeenAt: Int64?
     var chatRole: String? = nil
     var mutedUntil: Int64? = nil
+    var bio: String? = nil
+    var lastSeenVisibility: String? = nil
+    var readReceipts: Bool? = nil
 
     var title: String { displayName.isEmpty ? username : displayName }
     var isOwnerRole: Bool { chatRole == "owner" }
@@ -146,6 +149,7 @@ struct Chat: Codable, Identifiable, Hashable {
     var archived: Bool = false
     var folderId: String? = nil
     var wallpaper: String? = nil
+    var autoDeleteSeconds: Int? = nil
 
     var isGroup: Bool { type == "group" }
     var isSaved: Bool { type == "saved" }
@@ -214,6 +218,17 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
     let joined: Bool
 }
 struct ChannelsResponse: Codable { let channels: [ChannelSummary] }
+
+struct SessionInfo: Codable, Identifiable, Hashable {
+    let id: String
+    let device: String
+    let platform: String
+    let createdAt: Int64
+    let lastActiveAt: Int64
+    let current: Bool
+}
+struct SessionsResponse: Codable { let sessions: [SessionInfo] }
+struct UserResponse: Codable { let user: User }
 struct FolderResponse: Codable { let folder: Folder }
 struct TopicResponse: Codable { let topic: Topic }
 struct PollResponse: Codable { let poll: Poll }

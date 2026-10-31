@@ -29,6 +29,12 @@ struct SettingsView: View {
                             Text("@\(app.me?.username ?? "")")
                                 .font(.system(size: 14))
                                 .foregroundColor(c.textSecondary)
+                            if let bio = app.me?.bio, !bio.isEmpty {
+                                Text(bio)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(c.textSecondary)
+                                    .lineLimit(2)
+                            }
                             Text(app.me?.role == "admin" ? "管理员账号" : "普通账号")
                                 .font(.system(size: 12))
                                 .foregroundColor(c.accent)
@@ -36,6 +42,29 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 6)
                     .listRowBackground(c.background)
+                }
+
+                Section {
+                    NavigationLink { ProfileEditView() } label: {
+                        Text("编辑资料").foregroundColor(c.textPrimary)
+                    }
+                    NavigationLink { PrivacySettingsView() } label: {
+                        Text("隐私与安全").foregroundColor(c.textPrimary)
+                    }
+                    NavigationLink { BlocklistView() } label: {
+                        Text("黑名单").foregroundColor(c.textPrimary)
+                    }
+                    NavigationLink { SessionsView() } label: {
+                        Text("会话管理").foregroundColor(c.textPrimary)
+                    }
+                    NavigationLink { NotificationSettingsView() } label: {
+                        Text("通知").foregroundColor(c.textPrimary)
+                    }
+                    NavigationLink { E2EEInfoView() } label: {
+                        Text("端到端加密说明").foregroundColor(c.textPrimary)
+                    }
+                } header: {
+                    Text("账号与隐私")
                 }
 
                 Section {

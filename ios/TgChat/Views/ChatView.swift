@@ -563,6 +563,13 @@ struct ChatView: View {
             } label: {
                 Label("举报", systemImage: "exclamationmark.bubble")
             }
+            if !liveChat.isGroup && !liveChat.isChannel {
+                Button(role: .destructive) {
+                    Task { await app.blockUser(message.senderId) }
+                } label: {
+                    Label("屏蔽用户", systemImage: "hand.raised")
+                }
+            }
         }
 
         if (message.senderId == myId || liveChat.canManage) && !message.deleted {

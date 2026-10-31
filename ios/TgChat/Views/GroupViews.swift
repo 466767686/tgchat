@@ -212,6 +212,26 @@ struct GroupInfoView: View {
                             }
                             .listRowBackground(c.background)
 
+                            Menu {
+                                ForEach([0, 3600, 86400, 604800], id: \.self) { value in
+                                    Button(autoDeleteLabel(value)) {
+                                        Task { await app.updateChat(chatId: chatId, fields: ["autoDeleteSeconds": value]) }
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    Text("定时删除").foregroundColor(c.textPrimary)
+                                    Spacer()
+                                    Text(autoDeleteLabel(chat.autoDeleteSeconds ?? 0))
+                                        .font(.system(size: 13))
+                                        .foregroundColor(c.textTertiary)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(c.textTertiary)
+                                }
+                            }
+                            .listRowBackground(c.background)
+
                             Toggle("隐藏历史消息", isOn: Binding(
                                 get: { chat.historyVisible == false },
                                 set: { value in
@@ -330,6 +350,16 @@ struct GroupInfoView: View {
                 }
                 Button("取消", role: .cancel) {}
             }
+        }
+    }
+
+    private func autoDeleteLabel(_ seconds: Int) -> String {
+        switch seconds {
+        case 0: return "关闭"
+        case 3600: return "1 小时"
+        case 86400: return "1 天"
+        case 604800: return "7 天"
+        default: return "\(seconds) 秒"
         }
     }
 

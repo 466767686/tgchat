@@ -317,6 +317,7 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
     isPublic: (chat.is_public ?? 0) === 1,
     discussionChatId: chat.discussion_chat_id ?? null,
     subscriberCount: members.results.length,
+    autoDeleteSeconds: chat.auto_delete_seconds ?? 0,
     createdAt: chat.created_at,
     lastReadSeq: me?.last_read_seq ?? 0,
     otherReadSeq: otherRead?.n ?? 0,
@@ -470,11 +471,16 @@ export async function handleRequest(
     const now = Date.now();
     await env.DB.batch([
       env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now),
-      env.DB.prepare("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").bind(
+      env.DB.prepare(
+        "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, device_name, platform, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(
         await sha256Hex(token),
         user.id,
         now,
         now + days * 24 * 60 * 60 * 1000,
+        (request.headers.get("x-device-name") ?? "iOS").slice(0, 64),
+        (request.headers.get("x-platform") ?? "ios").slice(0, 32),
+        now,
       ),
       env.DB.prepare("UPDATE users SET last_seen_at = ? WHERE id = ?").bind(now, user.id),
     ]);
@@ -490,6 +496,71 @@ export async function handleRequest(
       await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256Hex(match[1])).run();
     }
     return ok({ ok: true, userId: me.id });
+  }
+
+  if (method === "GET" && path === "/api/sessions") {
+    const me = await authenticate(request, env);
+    const header = request.headers.get("authorization") ?? "";
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    const currentHash = match ? await sha256Hex(match[1]) : "";
+    const rows = await env.DB.prepare(
+      "SELECT token_hash, created_at, expires_at, device_name, platform, last_active_at FROM sessions WHERE user_id = ? AND expires_at > ? ORDER BY created_at DESC",
+    )
+      .bind(me.id, Date.now())
+      .all<any>();
+    return json({
+      sessions: rows.results.map((s: any) => ({
+        id: s.token_hash,
+        device: s.device_name ?? "未知设备",
+        platform: s.platform ?? "",
+        createdAt: s.created_at,
+        lastActiveAt: s.last_active_at ?? s.created_at,
+        current: s.token_hash === currentHash,
+      })),
+    });
+  }
+
+  if (method === "DELETE" && path === "/api/sessions") {
+    const me = await authenticate(request, env);
+    const header = request.headers.get("authorization") ?? "";
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    const currentHash = match ? await sha256Hex(match[1]) : "";
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").bind(me.id, currentHash).run();
+    return ok({ ok: true });
+  }
+
+  if (method === "DELETE" && seg.length === 3 && seg[0] === "api" && seg[1] === "sessions") {
+    const me = await authenticate(request, env);
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash = ?")
+      .bind(me.id, seg[2])
+      .run();
+    return ok({ ok: true });
+  }
+
+  if (method === "GET" && path === "/api/blocks") {
+    const me = await authenticate(request, env);
+    const rows = await env.DB.prepare(
+      `SELECT u.* FROM blocks b JOIN users u ON u.id = b.blocked_id WHERE b.blocker_id = ? ORDER BY b.created_at DESC`,
+    )
+      .bind(me.id)
+      .all<any>();
+    return json({ users: rows.results.map(publicUser) });
+  }
+
+  if (seg.length === 4 && seg[0] === "api" && seg[1] === "users" && seg[3] === "block" && (method === "POST" || method === "DELETE")) {
+    const me = await authenticate(request, env);
+    const targetId = seg[2];
+    if (targetId === me.id) throw new ApiError(400, "不能屏蔽自己", "invalid_input");
+    const target = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(targetId).first();
+    if (!target) throw new ApiError(404, "用户不存在", "not_found");
+    if (method === "POST") {
+      await env.DB.prepare("INSERT OR IGNORE INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)")
+        .bind(me.id, targetId, Date.now())
+        .run();
+    } else {
+      await env.DB.prepare("DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?").bind(me.id, targetId).run();
+    }
+    return ok({ ok: true });
   }
 
   // ---------------- me ----------------
@@ -508,10 +579,30 @@ export async function handleRequest(
       typeof body.avatarColor === "string" && /^#[0-9a-fA-F]{6}$/.test(body.avatarColor)
         ? body.avatarColor
         : me.avatar_color;
-    await env.DB.prepare("UPDATE users SET display_name = ?, avatar_color = ? WHERE id = ?")
-      .bind(displayName, avatarColor, me.id)
+    const bio = typeof body.bio === "string" ? body.bio.slice(0, 256) : (me.bio ?? null);
+    const visibility =
+      typeof body.lastSeenVisibility === "string" && ["everyone", "contacts", "nobody"].includes(body.lastSeenVisibility)
+        ? body.lastSeenVisibility
+        : (me.last_seen_visibility ?? "everyone");
+    const receipts =
+      body.readReceipts === undefined ? (me.read_receipts ?? 1) : body.readReceipts ? 1 : 0;
+
+    await env.DB.prepare(
+      "UPDATE users SET display_name = ?, avatar_color = ?, bio = ?, last_seen_visibility = ?, read_receipts = ? WHERE id = ?",
+    )
+      .bind(displayName, avatarColor, bio, visibility, receipts, me.id)
       .run();
-    return json({ user: { ...publicUser(me), displayName, avatarColor } });
+
+    return json({
+      user: {
+        ...publicUser(me),
+        displayName,
+        avatarColor,
+        bio,
+        lastSeenVisibility: visibility,
+        readReceipts: receipts === 1,
+      },
+    });
   }
 
   // ---------------- users directory ----------------
@@ -536,7 +627,7 @@ export async function handleRequest(
     const rows = await env.DB.prepare(
       `SELECT c.id, c.type, c.title, c.description, c.announcement, c.photo_url, c.join_mode,
               c.slow_mode, c.history_visible, c.topics_enabled,
-              c.username, c.is_public, c.discussion_chat_id,
+              c.username, c.is_public, c.discussion_chat_id, c.auto_delete_seconds,
               (SELECT COUNT(*) FROM chat_members cmc WHERE cmc.chat_id = c.id) AS subscriber_count,
               c.created_at, cm.last_read_seq, cm.role AS my_role,
               cm.pinned AS my_pinned, cm.archived AS my_archived,
@@ -605,6 +696,7 @@ export async function handleRequest(
       isPublic: (c.is_public ?? 0) === 1,
       discussionChatId: c.discussion_chat_id ?? null,
       subscriberCount: c.subscriber_count ?? 0,
+      autoDeleteSeconds: c.auto_delete_seconds ?? 0,
       createdAt: c.created_at,
       myRole: c.my_role ?? "member",
       pinned: (c.my_pinned ?? 0) === 1,
@@ -930,6 +1022,10 @@ export async function handleRequest(
       fields.push("topics_enabled = ?");
       values.push(body.topicsEnabled ? 1 : 0);
     }
+    if (typeof body.autoDeleteSeconds === "number") {
+      fields.push("auto_delete_seconds = ?");
+      values.push(Math.max(0, Math.min(604800, Math.floor(body.autoDeleteSeconds))));
+    }
     if (typeof body.username === "string") {
       const username = body.username.trim().toLowerCase();
       if (username && !/^[a-z0-9_]{4,32}$/.test(username)) {
@@ -1196,6 +1292,14 @@ export async function handleRequest(
       const topicParam = params.get("topic");
 
       const chat = await getChatRow(env, chatId);
+      if ((chat.auto_delete_seconds ?? 0) > 0) {
+        const cutoff = Date.now() - chat.auto_delete_seconds * 1000;
+        await env.DB.prepare(
+          "UPDATE messages SET deleted_at = ?, text = '' WHERE chat_id = ? AND created_at < ? AND deleted_at IS NULL",
+        )
+          .bind(Date.now(), chatId, cutoff)
+          .run();
+      }
       const member = await env.DB.prepare("SELECT role, joined_seq FROM chat_members WHERE chat_id = ? AND user_id = ?")
         .bind(chatId, me.id)
         .first<any>();
@@ -1234,6 +1338,21 @@ export async function handleRequest(
         .first<any>();
       if (memberState?.muted_until && memberState.muted_until > Date.now()) {
         throw new ApiError(403, "你已被禁言", "muted");
+      }
+
+      const chatForBlock = await getChatRow(env, chatId);
+      if (chatForBlock.type === "direct") {
+        const other = await env.DB.prepare("SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ?")
+          .bind(chatId, me.id)
+          .first<any>();
+        if (other) {
+          const blocked = await env.DB.prepare(
+            "SELECT 1 AS x FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)",
+          )
+            .bind(me.id, other.user_id, other.user_id, me.id)
+            .first();
+          if (blocked) throw new ApiError(403, "你们之间存在屏蔽关系，无法发送消息", "blocked");
+        }
       }
       const chatRow = await getChatRow(env, chatId);
       const myRole = await chatRole(env, chatId, me.id);

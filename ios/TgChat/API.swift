@@ -227,6 +227,33 @@ final class APIClient {
         let _: SimpleResponse = try await request("/api/chats/\(chatId)/subscribe", method: "DELETE")
     }
 
+    func patchProfile(_ fields: [String: Any]) async throws -> UserResponse {
+        try await request("/api/me", method: "PATCH", body: fields)
+    }
+
+    func sessions() async throws -> SessionsResponse {
+        try await request("/api/sessions")
+    }
+
+    func revokeSession(id: String) async throws {
+        let _: SimpleResponse = try await request("/api/sessions/\(id)", method: "DELETE")
+    }
+
+    func revokeOtherSessions() async throws {
+        let _: SimpleResponse = try await request("/api/sessions", method: "DELETE")
+    }
+
+    func blocks() async throws -> UsersResponse {
+        try await request("/api/blocks")
+    }
+
+    func setBlock(userId: String, blocked: Bool) async throws {
+        let _: SimpleResponse = try await request(
+            "/api/users/\(userId)/block",
+            method: blocked ? "POST" : "DELETE"
+        )
+    }
+
     func batchChats(_ action: String, chatIds: [String]) async throws {
         let _: SimpleResponse = try await request(
             "/api/chats/batch",
