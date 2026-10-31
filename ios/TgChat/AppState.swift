@@ -353,6 +353,118 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Groups
+
+    func createGroup(title: String, memberIds: [String]) async -> Chat? {
+        do {
+            let response = try await api.createGroup(title: title, memberIds: memberIds)
+            await loadChats(silent: true)
+            return response.chat
+        } catch {
+            toast = error.localizedDescription
+            return nil
+        }
+    }
+
+    func updateChat(chatId: String, fields: [String: Any]) async {
+        do {
+            let response = try await api.updateChat(chatId: chatId, fields: fields)
+            replaceChat(response.chat)
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func addGroupMember(chatId: String, userId: String) async {
+        do {
+            let response = try await api.addMember(chatId: chatId, userId: userId)
+            replaceChat(response.chat)
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func removeGroupMember(chatId: String, userId: String) async {
+        do {
+            try await api.removeMember(chatId: chatId, userId: userId)
+            await loadChats(silent: true)
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func setGroupRole(chatId: String, userId: String, role: String) async {
+        do {
+            let response = try await api.setMemberRole(chatId: chatId, userId: userId, role: role)
+            replaceChat(response.chat)
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func muteGroupMember(chatId: String, userId: String, muted: Bool) async {
+        do {
+            let until = muted ? Int64(Date().timeIntervalSince1970 * 1000) + 86_400_000 * 365 : 0
+            let response = try await api.muteMember(chatId: chatId, userId: userId, until: until)
+            replaceChat(response.chat)
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func createGroupInvite(chatId: String) async -> String? {
+        do {
+            let response = try await api.createInvite(chatId: chatId)
+            return response.link
+        } catch {
+            toast = error.localizedDescription
+            return nil
+        }
+    }
+
+    func leaveGroup(chatId: String) async {
+        do {
+            try await api.leaveChat(chatId: chatId)
+            chats.removeAll { $0.id == chatId }
+            messages[chatId] = nil
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func dissolveGroup(chatId: String) async {
+        do {
+            try await api.dissolveChat(chatId: chatId)
+            chats.removeAll { $0.id == chatId }
+            messages[chatId] = nil
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func joinByInvite(code: String) async -> Chat? {
+        do {
+            let response = try await api.joinChat(code: code)
+            await loadChats(silent: true)
+            return response.chat
+        } catch {
+            toast = error.localizedDescription
+            return nil
+        }
+    }
+
+    func replaceChat(_ chat: Chat) {
+        if let index = chats.firstIndex(where: { $0.id == chat.id }) {
+            chats[index] = chat
+        } else {
+            chats.append(chat)
+        }
+    }
+
+    func chat(byId id: String) -> Chat? {
+        chats.first { $0.id == id }
+    }
+
     func searchMessages(chatId: String, query: String) async -> [Message] {
         do {
             return try await api.searchMessages(chatId: chatId, query: query).messages

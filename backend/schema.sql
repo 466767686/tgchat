@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS chats (
   id         TEXT PRIMARY KEY,
   type       TEXT NOT NULL DEFAULT 'direct',   -- 'direct' | 'group'
   title      TEXT,
+  description TEXT,
+  announcement TEXT,
+  photo_url  TEXT,
+  join_mode  TEXT NOT NULL DEFAULT 'invite',   -- invite | open | approval
   created_at INTEGER NOT NULL,
   created_by TEXT
 );
@@ -33,6 +37,8 @@ CREATE TABLE IF NOT EXISTS chat_members (
   user_id       TEXT NOT NULL,
   joined_at     INTEGER NOT NULL,
   last_read_seq INTEGER NOT NULL DEFAULT 0,
+  role          TEXT NOT NULL DEFAULT 'member', -- owner | admin | member
+  muted_until   INTEGER,
   PRIMARY KEY (chat_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_members_user ON chat_members(user_id);
@@ -78,6 +84,24 @@ CREATE TABLE IF NOT EXISTS message_reactions (
   PRIMARY KEY (message_id, user_id, emoji)
 );
 CREATE INDEX IF NOT EXISTS idx_reactions_chat ON message_reactions(chat_id);
+
+CREATE TABLE IF NOT EXISTS chat_invites (
+  code       TEXT PRIMARY KEY,
+  chat_id    TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  revoked    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_invites_chat ON chat_invites(chat_id);
+
+CREATE TABLE IF NOT EXISTS chat_join_requests (
+  id         TEXT PRIMARY KEY,
+  chat_id    TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'pending'
+);
 
 CREATE TABLE IF NOT EXISTS pinned_messages (
   chat_id    TEXT NOT NULL,

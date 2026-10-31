@@ -85,6 +85,18 @@ func formattedText(_ text: String) -> AttributedString {
         attributed[attributedRange].link = url
         attributed[attributedRange].underlineStyle = .single
     }
+    // highlight @mentions
+    let plain = String(attributed.characters)
+    if let regex = try? NSRegularExpression(pattern: "@[A-Za-z0-9_.]{2,32}") {
+        let nsRange = NSRange(plain.startIndex..<plain.endIndex, in: plain)
+        regex.enumerateMatches(in: plain, options: [], range: nsRange) { result, _, _ in
+            guard let result = result,
+                  let range = Range(result.range, in: plain),
+                  let attributedRange = Range(range, in: attributed) else { return }
+            attributed[attributedRange].foregroundColor = TgColors(dark: false).accent
+            attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
+        }
+    }
     return attributed
 }
 

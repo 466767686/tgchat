@@ -235,6 +235,59 @@ final class APIClient {
         return try await request("/api/users?query=\(escaped)")
     }
 
+    func createGroup(title: String, memberIds: [String], description: String = "") async throws -> ChatResponse {
+        try await request(
+            "/api/chats",
+            method: "POST",
+            body: [
+                "type": "group",
+                "title": title,
+                "description": description,
+                "memberIds": memberIds,
+            ]
+        )
+    }
+
+    func updateChat(chatId: String, fields: [String: Any]) async throws -> ChatResponse {
+        try await request("/api/chats/\(chatId)", method: "PATCH", body: fields)
+    }
+
+    func addMember(chatId: String, userId: String) async throws -> ChatResponse {
+        try await request("/api/chats/\(chatId)/members", method: "POST", body: ["userId": userId])
+    }
+
+    func removeMember(chatId: String, userId: String) async throws {
+        let _: SimpleResponse = try await request("/api/chats/\(chatId)/members/\(userId)", method: "DELETE")
+    }
+
+    func setMemberRole(chatId: String, userId: String, role: String) async throws -> ChatResponse {
+        try await request("/api/chats/\(chatId)/members/\(userId)", method: "PATCH", body: ["role": role])
+    }
+
+    func muteMember(chatId: String, userId: String, until: Int64) async throws -> ChatResponse {
+        try await request("/api/chats/\(chatId)/members/\(userId)", method: "PATCH", body: ["mutedUntil": Int(until)])
+    }
+
+    func createInvite(chatId: String, expiresInDays: Int = 0) async throws -> InviteResponse {
+        try await request("/api/chats/\(chatId)/invite", method: "POST", body: ["expiresInDays": expiresInDays])
+    }
+
+    func revokeInvite(chatId: String, code: String) async throws {
+        let _: SimpleResponse = try await request("/api/chats/\(chatId)/invite/\(code)", method: "DELETE")
+    }
+
+    func joinChat(code: String) async throws -> ChatResponse {
+        try await request("/api/chats/join", method: "POST", body: ["code": code])
+    }
+
+    func leaveChat(chatId: String) async throws {
+        let _: SimpleResponse = try await request("/api/chats/\(chatId)/leave", method: "POST")
+    }
+
+    func dissolveChat(chatId: String) async throws {
+        let _: SimpleResponse = try await request("/api/chats/\(chatId)", method: "DELETE")
+    }
+
     func createChat(memberIds: [String], title: String? = nil) async throws -> ChatResponse {
         var body: [String: Any] = ["memberIds": memberIds]
         if let title = title { body["title"] = title }

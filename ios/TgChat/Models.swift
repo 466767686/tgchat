@@ -15,8 +15,16 @@ struct User: Codable, Identifiable, Hashable {
     var avatarColor: String
     var role: String
     var lastSeenAt: Int64?
+    var chatRole: String? = nil
+    var mutedUntil: Int64? = nil
 
     var title: String { displayName.isEmpty ? username : displayName }
+    var isOwnerRole: Bool { chatRole == "owner" }
+    var isAdminRole: Bool { chatRole == "admin" || chatRole == "owner" }
+    var isMuted: Bool {
+        guard let mutedUntil = mutedUntil, mutedUntil > 0 else { return false }
+        return mutedUntil > Int64(Date().timeIntervalSince1970 * 1000)
+    }
 
     var initials: String {
         let name = title.trimmingCharacters(in: .whitespaces)
@@ -93,8 +101,15 @@ struct Chat: Codable, Identifiable, Hashable {
     let unread: Int
     let lastMessage: Message?
     let members: [User]
+    var description: String? = nil
+    var announcement: String? = nil
+    var photoUrl: String? = nil
+    var joinMode: String? = nil
+    var myRole: String? = nil
 
     var isGroup: Bool { type != "direct" }
+    var isOwner: Bool { myRole == "owner" }
+    var canManage: Bool { myRole == "owner" || myRole == "admin" }
 
     func peer(myId: String?) -> User? {
         members.first { $0.id != myId }
@@ -132,6 +147,7 @@ struct MessageResponse: Codable { let message: Message; let duplicate: Bool? }
 struct ReactionsResponse: Codable { let reactions: [Reaction] }
 struct UsersResponse: Codable { let users: [User] }
 struct ChatResponse: Codable { let chat: Chat; let created: Bool? }
+struct InviteResponse: Codable { let code: String; let link: String }
 struct SimpleResponse: Codable { let ok: Bool? }
 struct CreateUserResponse: Codable { let user: User; let chatId: String? }
 struct ErrorResponse: Codable { let error: String?; let code: String? }

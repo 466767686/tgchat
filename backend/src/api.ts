@@ -184,6 +184,12 @@ function mapMedia(row: any) {
   };
 }
 
+function randomInviteCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(10));
+  return Array.from(bytes).map((b) => alphabet[b % alphabet.length]).join("");
+}
+
 function intField(value: unknown): number | null {
   const parsed = parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) ? parsed : null;
@@ -193,7 +199,8 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
   const chat = await env.DB.prepare("SELECT * FROM chats WHERE id = ?").bind(chatId).first<any>();
   if (!chat) throw new ApiError(404, "会话不存在", "chat_not_found");
   const members = await env.DB.prepare(
-    `SELECT u.id, u.username, u.display_name, u.avatar_color, u.role, u.last_seen_at
+    `SELECT u.id, u.username, u.display_name, u.avatar_color, u.role, u.last_seen_at,
+            m.role AS member_role, m.muted_until
      FROM chat_members m JOIN users u ON u.id = m.user_id WHERE m.chat_id = ? ORDER BY u.display_name`,
   )
     .bind(chatId)
@@ -201,7 +208,7 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
   const last = await env.DB.prepare(`${MESSAGE_SELECT} WHERE m.chat_id = ? ORDER BY m.seq DESC LIMIT 1`)
     .bind(chatId)
     .first<any>();
-  const me = await env.DB.prepare("SELECT last_read_seq FROM chat_members WHERE chat_id = ? AND user_id = ?")
+  const me = await env.DB.prepare("SELECT last_read_seq, role FROM chat_members WHERE chat_id = ? AND user_id = ?")
     .bind(chatId, viewerId)
     .first<any>();
   const unread = await env.DB.prepare(
@@ -219,10 +226,15 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
     id: chat.id,
     type: chat.type,
     title: chat.title,
+    description: chat.description ?? null,
+    announcement: chat.announcement ?? null,
+    photoUrl: chat.photo_url ?? null,
+    joinMode: chat.join_mode ?? "invite",
     createdAt: chat.created_at,
     lastReadSeq: me?.last_read_seq ?? 0,
     otherReadSeq: otherRead?.n ?? 0,
     unread: unread?.n ?? 0,
+    myRole: me?.role ?? "member",
     lastMessage: last ? mapMessage(last) : null,
     members: members.results.map((m: any) => ({
       id: m.id,
@@ -230,9 +242,31 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
       displayName: m.display_name,
       avatarColor: m.avatar_color,
       role: m.role,
+      chatRole: m.member_role ?? "member",
+      mutedUntil: m.muted_until ?? null,
       lastSeenAt: m.last_seen_at,
     })),
   };
+}
+
+async function chatRole(env: Env, chatId: string, userId: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT role FROM chat_members WHERE chat_id = ? AND user_id = ?")
+    .bind(chatId, userId)
+    .first<any>();
+  return row?.role ?? null;
+}
+
+async function requireManager(env: Env, chatId: string, userId: string): Promise<string> {
+  const role = await chatRole(env, chatId, userId);
+  if (!role) throw new ApiError(403, "你不是该会话的成员", "forbidden");
+  if (role !== "owner" && role !== "admin") throw new ApiError(403, "需要管理员权限", "forbidden");
+  return role;
+}
+
+async function getChatRow(env: Env, chatId: string): Promise<any> {
+  const chat = await env.DB.prepare("SELECT * FROM chats WHERE id = ?").bind(chatId).first<any>();
+  if (!chat) throw new ApiError(404, "会话不存在", "chat_not_found");
+  return chat;
 }
 
 async function createChat(
@@ -254,11 +288,9 @@ async function createChat(
       creatorId,
     ),
     ...unique.map((uid) =>
-      env.DB.prepare("INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq) VALUES (?, ?, ?, 0)").bind(
-        id,
-        uid,
-        now,
-      ),
+      env.DB.prepare(
+        "INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq, role) VALUES (?, ?, ?, 0, ?)",
+      ).bind(id, uid, now, uid === creatorId ? "owner" : "member"),
     ),
   ];
   await env.DB.batch(stmts);
@@ -411,7 +443,8 @@ export async function handleRequest(
     ctx.waitUntil(env.DB.prepare("UPDATE users SET last_seen_at = ? WHERE id = ?").bind(Date.now(), me.id).run());
 
     const rows = await env.DB.prepare(
-      `SELECT c.id, c.type, c.title, c.created_at, cm.last_read_seq,
+      `SELECT c.id, c.type, c.title, c.description, c.announcement, c.photo_url, c.join_mode,
+              c.created_at, cm.last_read_seq, cm.role AS my_role,
               (SELECT MAX(cm2.last_read_seq) FROM chat_members cm2 WHERE cm2.chat_id = c.id AND cm2.user_id != ?) AS other_read_seq,
               (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.seq > cm.last_read_seq AND m.sender_id != ?) AS unread
        FROM chats c JOIN chat_members cm ON cm.chat_id = c.id
@@ -426,7 +459,8 @@ export async function handleRequest(
     if (ids.length > 0) {
       const placeholders = ids.map(() => "?").join(",");
       const members = await env.DB.prepare(
-        `SELECT m.chat_id, u.id, u.username, u.display_name, u.avatar_color, u.role, u.last_seen_at
+        `SELECT m.chat_id, u.id, u.username, u.display_name, u.avatar_color, u.role, u.last_seen_at,
+                m.role AS member_role, m.muted_until
          FROM chat_members m JOIN users u ON u.id = m.user_id
          WHERE m.chat_id IN (${placeholders}) ORDER BY u.display_name`,
       )
@@ -439,6 +473,8 @@ export async function handleRequest(
           displayName: m.display_name,
           avatarColor: m.avatar_color,
           role: m.role,
+          chatRole: m.member_role ?? "member",
+          mutedUntil: m.muted_until ?? null,
           lastSeenAt: m.last_seen_at,
         });
       }
@@ -462,7 +498,12 @@ export async function handleRequest(
       id: c.id,
       type: c.type,
       title: c.title,
+      description: c.description ?? null,
+      announcement: c.announcement ?? null,
+      photoUrl: c.photo_url ?? null,
+      joinMode: c.join_mode ?? "invite",
       createdAt: c.created_at,
+      myRole: c.my_role ?? "member",
       lastReadSeq: c.last_read_seq,
       otherReadSeq: c.other_read_seq ?? 0,
       unread: c.unread,
@@ -509,9 +550,200 @@ export async function handleRequest(
     return json({ chat: await loadChat(env, chatId, me.id), created: true }, 201);
   }
 
+  if (method === "POST" && seg.length === 3 && seg[0] === "api" && seg[1] === "chats" && seg[2] === "join") {
+    const me = await authenticate(request, env);
+    const body = await readBody(request);
+    const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
+    if (!code) throw new ApiError(400, "缺少邀请码", "invalid_input");
+
+    const invite = await env.DB.prepare("SELECT * FROM chat_invites WHERE code = ?").bind(code).first<any>();
+    if (!invite || invite.revoked) throw new ApiError(404, "邀请链接无效", "invalid_invite");
+    if (invite.expires_at && invite.expires_at < Date.now()) {
+      throw new ApiError(410, "邀请链接已过期", "expired_invite");
+    }
+
+    const exists = await env.DB.prepare("SELECT 1 AS x FROM chat_members WHERE chat_id = ? AND user_id = ?")
+      .bind(invite.chat_id, me.id)
+      .first();
+    if (!exists) {
+      await env.DB.prepare(
+        "INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq, role) VALUES (?, ?, ?, 0, 'member')",
+      )
+        .bind(invite.chat_id, me.id, Date.now())
+        .run();
+    }
+    return json({ chat: await loadChat(env, invite.chat_id, me.id) });
+  }
+
+  if (method === "PATCH" && seg.length === 3 && seg[0] === "api" && seg[1] === "chats") {
+    const me = await authenticate(request, env);
+    const chatId = seg[2];
+    await requireManager(env, chatId, me.id);
+    const body = await readBody(request);
+
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (typeof body.title === "string" && body.title.trim()) {
+      fields.push("title = ?");
+      values.push(text(body.title, "群名称", 1, 64));
+    }
+    if (typeof body.description === "string") {
+      fields.push("description = ?");
+      values.push(body.description.slice(0, 512));
+    }
+    if (typeof body.announcement === "string") {
+      fields.push("announcement = ?");
+      values.push(body.announcement.slice(0, 1024));
+    }
+    if (typeof body.photoUrl === "string") {
+      fields.push("photo_url = ?");
+      values.push(body.photoUrl.slice(0, 512));
+    }
+    if (typeof body.joinMode === "string" && ["invite", "open", "approval"].includes(body.joinMode)) {
+      fields.push("join_mode = ?");
+      values.push(body.joinMode);
+    }
+    if (!fields.length) throw new ApiError(400, "没有可更新的字段", "invalid_input");
+
+    values.push(chatId);
+    await env.DB.prepare(`UPDATE chats SET ${fields.join(", ")} WHERE id = ?`).bind(...values).run();
+    return json({ chat: await loadChat(env, chatId, me.id) });
+  }
+
+  if (method === "DELETE" && seg.length === 3 && seg[0] === "api" && seg[1] === "chats") {
+    const me = await authenticate(request, env);
+    const chatId = seg[2];
+    const chat = await getChatRow(env, chatId);
+    const role = await chatRole(env, chatId, me.id);
+    if (chat.type !== "group") throw new ApiError(400, "一对一聊天不能解散", "invalid_input");
+    if (role !== "owner") throw new ApiError(403, "只有群主可以解散群组", "forbidden");
+
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM messages WHERE chat_id = ?").bind(chatId),
+      env.DB.prepare("DELETE FROM media WHERE chat_id = ?").bind(chatId),
+      env.DB.prepare("DELETE FROM chat_members WHERE chat_id = ?").bind(chatId),
+      env.DB.prepare("DELETE FROM chat_invites WHERE chat_id = ?").bind(chatId),
+      env.DB.prepare("DELETE FROM pinned_messages WHERE chat_id = ?").bind(chatId),
+      env.DB.prepare("DELETE FROM message_reactions WHERE chat_id = ?").bind(chatId),
+      env.DB.prepare("DELETE FROM chats WHERE id = ?").bind(chatId),
+    ]);
+    return ok({ ok: true });
+  }
+
   // ---------------- single chat ----------------
   if (seg.length >= 4 && seg[0] === "api" && seg[1] === "chats") {
     const chatId = seg[2];
+
+    if (method === "POST" && seg.length === 4 && seg[3] === "members") {
+      const me = await authenticate(request, env);
+      await requireManager(env, chatId, me.id);
+      const chat = await getChatRow(env, chatId);
+      if (chat.type !== "group") throw new ApiError(400, "只有群组可以添加成员", "invalid_input");
+
+      const body = await readBody(request);
+      const userId = typeof body.userId === "string" ? body.userId : "";
+      if (!userId) throw new ApiError(400, "缺少 userId", "invalid_input");
+      const target = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(userId).first();
+      if (!target) throw new ApiError(404, "用户不存在", "not_found");
+
+      const exists = await env.DB.prepare("SELECT 1 AS x FROM chat_members WHERE chat_id = ? AND user_id = ?")
+        .bind(chatId, userId)
+        .first();
+      if (!exists) {
+        await env.DB.prepare(
+          "INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq, role) VALUES (?, ?, ?, 0, 'member')",
+        )
+          .bind(chatId, userId, Date.now())
+          .run();
+      }
+      return json({ chat: await loadChat(env, chatId, me.id) });
+    }
+
+    if (method === "POST" && seg.length === 4 && seg[3] === "leave") {
+      const me = await authenticate(request, env);
+      const role = await chatRole(env, chatId, me.id);
+      if (!role) throw new ApiError(403, "你不是该会话的成员", "forbidden");
+      if (role === "owner") {
+        const next = await env.DB.prepare(
+          "SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ? ORDER BY joined_at LIMIT 1",
+        )
+          .bind(chatId, me.id)
+          .first<any>();
+        if (next) {
+          await env.DB.prepare("UPDATE chat_members SET role = 'owner' WHERE chat_id = ? AND user_id = ?")
+            .bind(chatId, next.user_id)
+            .run();
+        }
+      }
+      await env.DB.prepare("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?").bind(chatId, me.id).run();
+      return ok({ ok: true });
+    }
+
+    if (method === "POST" && seg.length === 4 && seg[3] === "invite") {
+      const me = await authenticate(request, env);
+      await requireManager(env, chatId, me.id);
+      const chat = await getChatRow(env, chatId);
+      if (chat.type !== "group") throw new ApiError(400, "只有群组可以创建邀请链接", "invalid_input");
+
+      const body = await readBody(request);
+      const expiresInDays = Number(body.expiresInDays ?? 0);
+      const code = randomInviteCode();
+      await env.DB.prepare(
+        "INSERT INTO chat_invites (code, chat_id, created_by, created_at, expires_at, revoked) VALUES (?, ?, ?, ?, ?, 0)",
+      )
+        .bind(code, chatId, me.id, Date.now(), expiresInDays > 0 ? Date.now() + expiresInDays * 86_400_000 : null)
+        .run();
+      return json({ code, link: `tgchat://join/${code}` });
+    }
+
+    if (method === "DELETE" && seg.length === 5 && seg[3] === "invite") {
+      const me = await authenticate(request, env);
+      await requireManager(env, chatId, me.id);
+      await env.DB.prepare("UPDATE chat_invites SET revoked = 1 WHERE chat_id = ? AND code = ?")
+        .bind(chatId, seg[4])
+        .run();
+      return ok({ ok: true });
+    }
+
+    if ((method === "PATCH" || method === "DELETE") && seg.length === 5 && seg[3] === "members") {
+      const me = await authenticate(request, env);
+      const targetId = seg[4];
+      const myRole = await chatRole(env, chatId, me.id);
+      if (!myRole) throw new ApiError(403, "你不是该会话的成员", "forbidden");
+
+      if (method === "DELETE") {
+        if (targetId !== me.id) {
+          await requireManager(env, chatId, me.id);
+          const targetRole = await chatRole(env, chatId, targetId);
+          if (targetRole === "owner") throw new ApiError(403, "不能移除群主", "forbidden");
+        }
+        await env.DB.prepare("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?")
+          .bind(chatId, targetId)
+          .run();
+        return ok({ ok: true });
+      }
+
+      const body = await readBody(request);
+      if (typeof body.role === "string") {
+        if (myRole !== "owner") throw new ApiError(403, "只有群主可以设置管理员", "forbidden");
+        const role = body.role === "admin" ? "admin" : "member";
+        const targetRole = await chatRole(env, chatId, targetId);
+        if (targetRole === "owner") throw new ApiError(403, "不能修改群主角色", "forbidden");
+        await env.DB.prepare("UPDATE chat_members SET role = ? WHERE chat_id = ? AND user_id = ?")
+          .bind(role, chatId, targetId)
+          .run();
+      }
+      if (body.mutedUntil !== undefined) {
+        await requireManager(env, chatId, me.id);
+        const targetRole = await chatRole(env, chatId, targetId);
+        if (targetRole === "owner") throw new ApiError(403, "不能禁言群主", "forbidden");
+        const until = Number(body.mutedUntil) || 0;
+        await env.DB.prepare("UPDATE chat_members SET muted_until = ? WHERE chat_id = ? AND user_id = ?")
+          .bind(until, chatId, targetId)
+          .run();
+      }
+      return json({ chat: await loadChat(env, chatId, me.id) });
+    }
 
     if (method === "POST" && seg.length === 4 && seg[3] === "media") {
       const me = await authenticate(request, env);
@@ -573,6 +805,14 @@ export async function handleRequest(
     if (method === "POST" && seg.length === 4 && seg[3] === "messages") {
       const me = await authenticate(request, env);
       await assertMember(env, chatId, me.id);
+      const memberState = await env.DB.prepare(
+        "SELECT muted_until FROM chat_members WHERE chat_id = ? AND user_id = ?",
+      )
+        .bind(chatId, me.id)
+        .first<any>();
+      if (memberState?.muted_until && memberState.muted_until > Date.now()) {
+        throw new ApiError(403, "你已被禁言", "muted");
+      }
       const body = await readBody(request);
       const mediaId = typeof body.mediaId === "string" && body.mediaId ? body.mediaId : null;
       const rawText = typeof body.text === "string" ? body.text.trim() : "";
@@ -780,7 +1020,8 @@ export async function handleRequest(
       const me = await authenticate(request, env);
       await assertMember(env, chatId, me.id);
       const members = await env.DB.prepare(
-        `SELECT u.id, u.username, u.display_name, u.avatar_color, u.role, u.last_seen_at
+        `SELECT u.id, u.username, u.display_name, u.avatar_color, u.role, u.last_seen_at,
+                m.role AS member_role, m.muted_until
          FROM chat_members m JOIN users u ON u.id = m.user_id WHERE m.chat_id = ?`,
       )
         .bind(chatId)
@@ -792,6 +1033,8 @@ export async function handleRequest(
           displayName: m.display_name,
           avatarColor: m.avatar_color,
           role: m.role,
+          chatRole: m.member_role ?? "member",
+          mutedUntil: m.muted_until ?? null,
           lastSeenAt: m.last_seen_at,
         })),
       });

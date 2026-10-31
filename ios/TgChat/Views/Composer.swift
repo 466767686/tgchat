@@ -38,6 +38,7 @@ struct ChatComposer: View {
     @Binding var draft: String
     @Binding var replyTarget: Message?
     @Binding var editing: Message?
+    var mentionUsers: [User] = []
 
     @EnvironmentObject private var app: AppState
     @Environment(\.colorScheme) private var scheme
@@ -50,6 +51,7 @@ struct ChatComposer: View {
     @State private var showMediaCompose = false
     @State private var showEmoji = false
     @State private var showStickers = false
+    @State private var showMentions = false
     @StateObject private var recorder = VoiceRecorder()
 
     var body: some View {
@@ -224,6 +226,17 @@ struct ChatComposer: View {
                             if !newValue.isEmpty { app.sendTyping() }
                         }
 
+                    if !mentionUsers.isEmpty {
+                        Button {
+                            showMentions = true
+                        } label: {
+                            Image(systemName: "at")
+                                .font(.system(size: 19, weight: .medium))
+                                .foregroundColor(c.textSecondary)
+                                .frame(width: 28, height: 34)
+                        }
+                    }
+
                     Button {
                         showStickers.toggle()
                         if showStickers { showEmoji = false }
@@ -307,6 +320,12 @@ struct ChatComposer: View {
             if case .success(let urls) = result {
                 for url in urls { importFile(url) }
             }
+        }
+        .sheet(isPresented: $showMentions) {
+            MentionPickerView(users: mentionUsers) { user in
+                draft += "@\(user.username) "
+            }
+            .environmentObject(app)
         }
         .sheet(isPresented: $showMediaCompose) {
             MediaComposeSheet(items: pickedItems, chatId: chatId)

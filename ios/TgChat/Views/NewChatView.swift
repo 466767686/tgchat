@@ -8,12 +8,33 @@ struct NewChatView: View {
     let onOpen: (Chat) -> Void
 
     @State private var query = ""
+    @State private var showGroupCreate = false
 
     var body: some View {
         let c = TgColors(dark: scheme == .dark)
 
         NavigationStack {
             List {
+                Section {
+                    Button {
+                        showGroupCreate = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle().fill(c.accent.opacity(0.15)).frame(width: 46, height: 46)
+                                Image(systemName: "person.3.fill").foregroundColor(c.accent)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("新建群组").font(.system(size: 16, weight: .medium)).foregroundColor(c.textPrimary)
+                                Text("选择成员，创建群聊").font(.system(size: 12)).foregroundColor(c.textSecondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 12)).foregroundColor(c.textTertiary)
+                        }
+                    }
+                    .listRowBackground(c.background)
+                }
+
                 if app.usersDirectory.isEmpty {
                     Text("没有找到联系人，请联系管理员创建账号")
                         .font(.system(size: 14))
@@ -64,6 +85,13 @@ struct NewChatView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showGroupCreate) {
+                GroupCreateView { chat in
+                    onOpen(chat)
+                    dismiss()
+                }
+                .environmentObject(app)
             }
             .task {
                 await app.loadUsers(query: "")

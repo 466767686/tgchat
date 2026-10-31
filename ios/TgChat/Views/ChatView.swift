@@ -19,8 +19,12 @@ struct ChatView: View {
     @State private var showForwardPicker = false
     @State private var showSearch = false
     @State private var jumpToSeq: Int64?
+    @State private var showGroupInfo = false
 
     private var messages: [Message] { app.messages[chat.id] ?? [] }
+    private var liveChat: Chat { app.chat(byId: chat.id) ?? chat }
+    private var me: User? { liveChat.members.first { $0.id == myId } }
+    private var muted: Bool { me?.isMuted == true }
     private var myId: String? { app.me?.id }
     private var pinnedMessage: Message? { messages.last(where: { $0.pinned && !$0.deleted }) }
 
@@ -43,7 +47,23 @@ struct ChatView: View {
             if selectionMode {
                 selectionBar(c)
             } else {
-                ChatComposer(chatId: chat.id, draft: $draft, replyTarget: $replyTarget, editing: $editing)
+                if muted {
+                    HStack(spacing: 6) {
+                        Image(systemName: "speaker.slash.fill").font(.system(size: 11))
+                        Text("你已被禁言，无法发送消息").font(.system(size: 12))
+                    }
+                    .foregroundColor(c.danger)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(c.surfaceAlt)
+                }
+                ChatComposer(
+                    chatId: chat.id,
+                    draft: $draft,
+                    replyTarget: $replyTarget,
+                    editing: $editing,
+                    mentionUsers: liveChat.isGroup ? liveChat.members.filter { $0.id != myId } : []
+                )
             }
         }
         .background(c.background.ignoresSafeArea())
@@ -60,6 +80,10 @@ struct ChatView: View {
                 jumpToSeq = seq
             }
             .environmentObject(app)
+        }
+        .sheet(isPresented: $showGroupInfo) {
+            GroupInfoView(chatId: chat.id)
+                .environmentObject(app)
         }
         .sheet(isPresented: $showForwardPicker) {
             ForwardPickerView { target in
@@ -97,18 +121,28 @@ struct ChatView: View {
                     .frame(width: 32, height: 32)
             }
 
-            AvatarView(name: chat.displayTitle(myId: myId), colorHex: chat.avatarColor(myId: myId), size: 38)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(chat.displayTitle(myId: myId))
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(c.textPrimary)
-                    .lineLimit(1)
-                Text(statusText)
-                    .font(.system(size: 12))
-                    .foregroundColor(app.typingName != nil ? c.accent : c.textSecondary)
-                    .lineLimit(1)
+            Button {
+                if liveChat.isGroup { showGroupInfo = true }
+            } label: {
+                HStack(spacing: 10) {
+                    AvatarView(
+                        name: liveChat.displayTitle(myId: myId),
+                        colorHex: liveChat.avatarColor(myId: myId),
+                        size: 38
+                    )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(liveChat.displayTitle(myId: myId))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(c.textPrimary)
+                            .lineLimit(1)
+                        Text(statusText)
+                            .font(.system(size: 12))
+                            .foregroundColor(app.typingName != nil ? c.accent : c.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
             }
+            .buttonStyle(.plain)
 
             Spacer()
 
@@ -130,8 +164,8 @@ struct ChatView: View {
         if let typing = app.typingName {
             return "\(typing) 正在输入…"
         }
-        if chat.isGroup {
-            return "\(chat.members.count) 位成员"
+        if liveChat.isGroup {
+            return "\(liveChat.members.count) 位成员"
         }
         return "最近在线"
     }
