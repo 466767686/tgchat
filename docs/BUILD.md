@@ -115,10 +115,11 @@ OPTIONS /api/auth/login  → 204（CORS 预检）
 `.github/workflows/ios.yml` 在 `macos-latest` 上执行：`brew install xcodegen` → `xcodegen generate` → `xcodebuild ... CODE_SIGNING_ALLOWED=NO` → 打包 `Payload/TgChat.app` → 上传 `TgChat-unsigned.ipa`。
 
 ```text
-Run #41216505966  iOS unsigned IPA  →  success（6 个步骤全部通过）
-产物：TgChat-unsigned.ipa  351,593 bytes
-Payload/TgChat.app/TgChat   Mach-O 64-bit arm64 executable
-Info.plist: com.tgchat.app, 1.0.0 (1), MinimumOSVersion 16.0
+Run #41216505966  iOS unsigned IPA  →  success
+Run #41217956650  iOS unsigned IPA  →  success（加入计算器图标与伪装后）
+产物：TgChat-unsigned.ipa  404,737 bytes
+Payload/TgChat.app/AppIcon60x60@2x.png + Assets.car（计算器图标）
+Info.plist: CFBundleDisplayName=计算器, com.tgchat.app, 1.0.0 (1), MinimumOSVersion 16.0
 未签名（无 _CodeSignature），符合预期
 ```
 
