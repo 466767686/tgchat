@@ -11,11 +11,14 @@ on:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: xcodebuild -version && sw_vers
 
       - name: Install XcodeGen
         run: brew install xcodegen
