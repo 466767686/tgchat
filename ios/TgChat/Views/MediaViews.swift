@@ -266,11 +266,15 @@ struct FileAttachmentRow: View {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let file = try await FileDownloader.shared.download(request) { value in
+                Task { @MainActor in
+                    progress = value
+                }
+            }
             let name = media.displayName.isEmpty ? "file" : media.displayName
             let destination = FileManager.default.temporaryDirectory.appendingPathComponent(name)
             try? FileManager.default.removeItem(at: destination)
-            try data.write(to: destination)
+            try FileManager.default.moveItem(at: file, to: destination)
             localFile = destination
         } catch {
             errorText = "下载失败"
@@ -359,6 +363,71 @@ struct VideoPlayerSheet: View {
         }
         .onDisappear {
             player?.pause()
+        }
+    }
+}
+
+// MARK: - File download with progress
+
+final class FileDownloader: NSObject, URLSessionDownloadDelegate {
+    static let shared = FileDownloader()
+
+    private var progressHandlers: [Int: (Double) -> Void] = [:]
+    private var completions: [Int: (Result<URL, Error>) -> Void] = [:]
+    private var finishedFiles: [Int: URL] = [:]
+    private lazy var session: URLSession = URLSession(
+        configuration: .default,
+        delegate: self,
+        delegateQueue: nil
+    )
+
+    func download(_ request: URLRequest, progress: @escaping (Double) -> Void) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            let task = session.downloadTask(with: request)
+            progressHandlers[task.taskIdentifier] = progress
+            completions[task.taskIdentifier] = { continuation.resume(with: $0) }
+            task.resume()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        progressHandlers[downloadTask.taskIdentifier]?(
+            Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+        )
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.copyItem(at: location, to: destination)
+        finishedFiles[downloadTask.taskIdentifier] = destination
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let id = task.taskIdentifier
+        defer {
+            progressHandlers[id] = nil
+            completions[id] = nil
+            finishedFiles[id] = nil
+        }
+        guard let completion = completions[id] else { return }
+        if let error = error {
+            completion(.failure(error))
+        } else if let file = finishedFiles[id] {
+            completion(.success(file))
+        } else {
+            completion(.failure(ApiError.server("下载失败")))
         }
     }
 }
