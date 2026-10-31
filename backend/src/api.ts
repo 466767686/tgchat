@@ -257,7 +257,10 @@ export async function handleRequest(
     if (!row) throw new ApiError(404, "文件不存在", "not_found");
     await assertMember(env, row.chat_id, viewer.id);
 
-    const object = await env.MEDIA.get(row.object_key, { range: request.headers });
+    const hasRange = request.headers.has("range");
+    const object = hasRange
+      ? await env.MEDIA.get(row.object_key, { range: request.headers })
+      : await env.MEDIA.get(row.object_key);
     if (!object) throw new ApiError(404, "文件不存在", "not_found");
 
     const headers = new Headers();
@@ -270,7 +273,7 @@ export async function handleRequest(
 
     let status = 200;
     const range = (object as any).range as { offset?: number; length?: number } | undefined;
-    if (range && typeof range.offset === "number") {
+    if (hasRange && range && typeof range.offset === "number") {
       const start = range.offset;
       const length = range.length ?? object.size - start;
       const end = start + length - 1;
