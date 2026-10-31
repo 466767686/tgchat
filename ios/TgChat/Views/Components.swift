@@ -89,7 +89,7 @@ struct MessageBubbleView: View {
         let plain = message.text.isEmpty ? " " : message.text
         let font = UIFont.systemFont(ofSize: 16)
         let rect = (plain as NSString).boundingRect(
-            with: CGSize(width: 264, height: .greatestFiniteMagnitude),
+            with: CGSize(width: 264, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font],
             context: nil
