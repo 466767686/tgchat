@@ -117,7 +117,9 @@ struct ChatsView: View {
         }
     }
 
+    @ViewBuilder
     private func chatRow(_ chat: Chat, colors c: TgColors) -> some View {
+        VStack(spacing: 0) {
         NavigationLink(value: chat) {
             ChatRowView(chat: chat, myId: app.me?.id, colors: c)
         }
@@ -172,6 +174,7 @@ struct ChatsView: View {
         }
 
         Divider().padding(.leading, 78)
+        }
     }
 
     private func sectionHeader(_ title: String, colors c: TgColors) -> some View {
