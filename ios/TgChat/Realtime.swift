@@ -11,6 +11,27 @@ final class RealtimeClient {
     private let session = URLSession(configuration: .default)
 
     func connect(baseURL: String, chatId: String, token: String) {
+        open(
+            baseURL: baseURL,
+            queryItems: [
+                URLQueryItem(name: "chat", value: chatId),
+                URLQueryItem(name: "token", value: token),
+            ]
+        )
+    }
+
+    /// One connection that receives messages for every conversation of the user.
+    func connectUser(baseURL: String, token: String) {
+        open(
+            baseURL: baseURL,
+            queryItems: [
+                URLQueryItem(name: "user", value: "1"),
+                URLQueryItem(name: "token", value: token),
+            ]
+        )
+    }
+
+    private func open(baseURL: String, queryItems: [URLQueryItem]) {
         disconnect()
 
         var base = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -22,10 +43,7 @@ final class RealtimeClient {
         while base.hasSuffix("/") { base.removeLast() }
 
         guard var components = URLComponents(string: base + "/api/ws") else { return }
-        components.queryItems = [
-            URLQueryItem(name: "chat", value: chatId),
-            URLQueryItem(name: "token", value: token),
-        ]
+        components.queryItems = queryItems
         guard let url = components.url else { return }
 
         let socket = session.webSocketTask(with: url)

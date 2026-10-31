@@ -34,6 +34,7 @@ final class AppState: ObservableObject {
     @Published var messages: [String: [Message]] = [:]
     @Published var typingName: String?
     @Published var toast: String?
+    @Published var appActive = true
 
     @Published var usersDirectory: [User] = []
     @Published var adminUsers: [User] = []
@@ -41,6 +42,7 @@ final class AppState: ObservableObject {
 
     private let api = APIClient.shared
     private let realtime = RealtimeClient()
+    private let inbox = RealtimeClient()
     private let defaults = UserDefaults.standard
 
     private var chatsPoll: Task<Void, Never>?
@@ -49,6 +51,7 @@ final class AppState: ObservableObject {
     private var lastReadSent: [String: Int64] = [:]
     private var activeChatId: String?
     private var lastTypingAt = Date.distantPast
+    private var pendingChatId: String?
 
     init() {
         let savedBase = defaults.string(forKey: "baseURL") ?? Config.defaultBaseURL
@@ -82,6 +85,7 @@ final class AppState: ObservableObject {
             persistUser()
             await loadChats(silent: false)
             startChatsPolling()
+            connectInbox()
         } catch {
             if me == nil { clearSession() }
         }
@@ -104,6 +108,7 @@ final class AppState: ObservableObject {
             persistUser()
             await loadChats(silent: false)
             startChatsPolling()
+            connectInbox()
         } catch {
             loginError = error.localizedDescription
         }
@@ -113,6 +118,7 @@ final class AppState: ObservableObject {
     func logout() async {
         await api.logout()
         realtime.disconnect()
+        inbox.disconnect()
         chatsPoll?.cancel()
         chatPoll?.cancel()
         clearSession()
@@ -146,6 +152,7 @@ final class AppState: ObservableObject {
         baseURL = value
         api.baseURL = value
         defaults.set(value, forKey: "baseURL")
+        if token != nil { connectInbox() }
     }
 
     func setTheme(_ mode: ThemeMode) {
@@ -375,6 +382,50 @@ final class AppState: ObservableObject {
             }
         }
         realtime.connect(baseURL: baseURL, chatId: chatId, token: token)
+    }
+
+    // MARK: - Background inbox (local notifications)
+
+    private func connectInbox() {
+        guard let token = token else { return }
+        inbox.onMessage = { [weak self] message in
+            Task { @MainActor in
+                self?.handleInboxMessage(message)
+            }
+        }
+        inbox.onClosed = { [weak self] in
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard let self = self, self.token != nil else { return }
+                self.connectInbox()
+            }
+        }
+        inbox.connectUser(baseURL: baseURL, token: token)
+    }
+
+    private func handleInboxMessage(_ message: Message) {
+        if let existing = messages[message.chatId] {
+            messages[message.chatId] = merge(existing, [message])
+        }
+        Task { await loadChats(silent: true) }
+
+        if appActive && activeChatId == message.chatId { return }
+        LocalNotifications.show(message)
+    }
+
+    func requestOpenChat(_ chatId: String) {
+        if chats.contains(where: { $0.id == chatId }) {
+            Task { await openChat(chatId) }
+            return
+        }
+        pendingChatId = chatId
+        Task {
+            await loadChats(silent: true)
+            if let id = pendingChatId, chats.contains(where: { $0.id == id }) {
+                pendingChatId = nil
+                await openChat(id)
+            }
+        }
     }
 
     // MARK: - Users

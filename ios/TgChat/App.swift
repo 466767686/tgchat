@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct TgChatApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var app = AppState()
 
     var body: some Scene {
@@ -50,7 +51,18 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: app.toast)
         .onChange(of: scenePhase) { phase in
+            app.appActive = phase == .active
+            if phase == .active {
+                KeepAliveAudio.shared.stop()
+            } else if app.isLoggedIn {
+                KeepAliveAudio.shared.start()
+            }
             if phase == .background { app.lock() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tgOpenChat)) { notification in
+            if let chatId = notification.object as? String {
+                app.requestOpenChat(chatId)
+            }
         }
     }
 }
