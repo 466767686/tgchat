@@ -429,7 +429,7 @@ final class AppState: ObservableObject {
     }
 
     func loadTopic(chatId: String, topicId: String) async {
-        guard let response = try? await api.messages(chatId: chatId, topicId: topicId, limit: 60) else { return }
+        guard let response = try? await api.messages(chatId: chatId, limit: 60, topicId: topicId) else { return }
         messages[chatId] = merge(messages[chatId] ?? [], response.messages)
     }
 
