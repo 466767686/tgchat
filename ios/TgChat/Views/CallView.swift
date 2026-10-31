@@ -1,4 +1,6 @@
+import AVFoundation
 import SwiftUI
+import WebRTC
 
 struct CallView: View {
     @ObservedObject private var call = CallService.shared
@@ -6,25 +8,49 @@ struct CallView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(hex: "#22303F"), Color(hex: "#101820")],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            if call.videoEnabled, let track = call.remoteVideoTrack {
+                RemoteVideoView(track: track)
+                    .ignoresSafeArea()
+                Color.black.opacity(0.25).ignoresSafeArea()
+            } else {
+                LinearGradient(
+                    colors: [Color(hex: "#22303F"), Color(hex: "#101820")],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+            }
 
             VStack(spacing: 18) {
+                HStack {
+                    Spacer()
+                    if call.videoEnabled, let session = call.localSession {
+                        LocalPreviewView(session: session)
+                            .frame(width: 96, height: 132)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                            )
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+
                 Spacer()
 
-                AvatarView(name: call.peerName.isEmpty ? "?" : call.peerName, colorHex: "#3390EC", size: 110)
+                if !(call.videoEnabled && call.remoteVideoTrack != nil) {
+                    AvatarView(name: call.peerName.isEmpty ? "?" : call.peerName, colorHex: "#3390EC", size: 110)
+                }
 
                 Text(call.peerName.isEmpty ? "语音通话" : call.peerName)
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundColor(.white)
+                    .shadow(radius: 2)
 
                 Text(statusText)
                     .font(.system(size: 15))
-                    .foregroundColor(.white.opacity(0.72))
+                    .foregroundColor(.white.opacity(0.78))
 
                 if case .active = call.state {
                     Text(durationText)
@@ -51,10 +77,10 @@ struct CallView: View {
     private var statusText: String {
         switch call.state {
         case .idle: return ""
-        case .outgoing: return "正在呼叫…"
-        case .incoming: return "邀请你进行语音通话"
+        case .outgoing: return call.videoEnabled ? "正在视频通话呼叫…" : "正在呼叫…"
+        case .incoming: return call.videoEnabled ? "邀请你进行视频通话" : "邀请你进行语音通话"
         case .connecting: return "连接中…"
-        case .active: return "通话中"
+        case .active: return call.videoEnabled ? "视频通话中" : "通话中"
         case .ended(let reason): return reason
         }
     }
@@ -122,5 +148,40 @@ struct CallView: View {
                 .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.7))
         }
+    }
+}
+
+struct RemoteVideoView: UIViewRepresentable {
+    let track: RTCVideoTrack?
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> RTCMTLVideoView {
+        let view = RTCMTLVideoView(frame: .zero)
+        view.videoContentMode = .scaleAspectFill
+        return view
+    }
+
+    func updateUIView(_ uiView: RTCMTLVideoView, context: Context) {
+        guard context.coordinator.track !== track else { return }
+        context.coordinator.track?.remove(uiView)
+        context.coordinator.track = track
+        track?.add(uiView)
+    }
+
+    final class Coordinator {
+        var track: RTCVideoTrack?
+    }
+}
+
+struct LocalPreviewView: UIViewRepresentable {
+    let session: AVCaptureSession?
+
+    func makeUIView(context: Context) -> RTCCameraPreviewView {
+        RTCCameraPreviewView()
+    }
+
+    func updateUIView(_ uiView: RTCCameraPreviewView, context: Context) {
+        uiView.captureSession = session
     }
 }

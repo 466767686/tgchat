@@ -229,6 +229,20 @@ struct ChatView: View {
                         .foregroundColor(c.accent)
                         .frame(width: 32, height: 32)
                 }
+
+                Button {
+                    CallService.shared.startCall(
+                        chatId: chat.id,
+                        peerName: liveChat.displayTitle(myId: myId),
+                        video: true
+                    )
+                    showCall = true
+                } label: {
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(c.accent)
+                        .frame(width: 32, height: 32)
+                }
             }
 
             Button {

@@ -55,6 +55,7 @@ struct ChatComposer: View {
     @State private var showEmoji = false
     @State private var showStickers = false
     @State private var showMentions = false
+    @State private var showVideoNote = false
     @StateObject private var recorder = VoiceRecorder()
 
     var body: some View {
@@ -309,6 +310,9 @@ struct ChatComposer: View {
         }
         .confirmationDialog("发送", isPresented: $showAttachMenu, titleVisibility: .hidden) {
             Button("照片或视频") { showPhotoPicker = true }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("视频消息") { showVideoNote = true }
+            }
             Button("文件") { showFilePicker = true }
             if allowPoll {
                 Button("投票") { onCreatePoll?() }
@@ -334,6 +338,11 @@ struct ChatComposer: View {
                 for url in urls { importFile(url) }
             }
         }
+        .sheet(isPresented: $showVideoNote) {
+            VideoNotePicker { url in
+                sendVideoNote(url)
+            }
+        }
         .sheet(isPresented: $showMentions) {
             MentionPickerView(users: mentionUsers) { user in
                 draft += "@\(user.username) "
@@ -348,6 +357,26 @@ struct ChatComposer: View {
 
     private var recentLevels: [CGFloat] {
         Array(recorder.levels.suffix(26))
+    }
+
+    private func sendVideoNote(_ url: URL) {
+        let copy = FileManager.default.temporaryDirectory
+            .appendingPathComponent("note-\(UUID().uuidString).mov")
+        try? FileManager.default.removeItem(at: copy)
+        guard (try? FileManager.default.copyItem(at: url, to: copy)) != nil else { return }
+        let asset = AVURLAsset(url: copy)
+        let seconds = CMTimeGetSeconds(asset.duration)
+        app.sendMedia(
+            chatId: chatId,
+            fileURL: copy,
+            kind: "video_note",
+            mime: "video/quicktime",
+            name: "video_note.mov",
+            caption: "",
+            width: 240,
+            height: 240,
+            durationMs: Int(seconds * 1000)
+        )
     }
 
     private func recorderTime(_ value: TimeInterval) -> String {

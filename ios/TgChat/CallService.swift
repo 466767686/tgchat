@@ -27,6 +27,9 @@ final class CallService: NSObject, ObservableObject {
     @Published var micMuted = false
     @Published var speakerOn = true
     @Published var duration: TimeInterval = 0
+    @Published var videoEnabled = false
+    @Published var remoteVideoTrack: RTCVideoTrack?
+    @Published var localSession: AVCaptureSession?
 
     var realtime: RealtimeClient?
 
@@ -38,6 +41,8 @@ final class CallService: NSObject, ObservableObject {
     private var durationTimer: Timer?
     private var isCaller = false
     private var startedAt: Date?
+    private var videoSource: RTCVideoSource?
+    private var capturer: RTCCameraVideoCapturer?
 
     private let iceServers = [
         RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"]),
@@ -46,10 +51,11 @@ final class CallService: NSObject, ObservableObject {
 
     // MARK: - Lifecycle
 
-    func startCall(chatId: String, peerName: String) {
+    func startCall(chatId: String, peerName: String, video: Bool = false) {
         guard !state.isBusy else { return }
         self.chatId = chatId
         self.peerName = peerName
+        self.videoEnabled = video
         isCaller = true
         state = .outgoing
         duration = 0
@@ -60,6 +66,7 @@ final class CallService: NSObject, ObservableObject {
             return
         }
         addLocalAudio(to: pc)
+        addLocalVideo(to: pc)
 
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         pc.offer(for: constraints) { [weak self] sdp, error in
@@ -76,6 +83,7 @@ final class CallService: NSObject, ObservableObject {
                     "type": "call.invite",
                     "chatId": chatId,
                     "sdp": sdp.sdp,
+                    "video": video,
                 ])
             }
         }
@@ -91,6 +99,7 @@ final class CallService: NSObject, ObservableObject {
             return
         }
         addLocalAudio(to: pc)
+        addLocalVideo(to: pc)
 
         let description = RTCSessionDescription(type: .offer, sdp: sdp)
         pc.setRemoteDescription(description) { [weak self] error in
@@ -165,6 +174,7 @@ final class CallService: NSObject, ObservableObject {
             chatId = payload["chatId"] as? String
             peerName = payload["fromName"] as? String ?? "对方"
             pendingOfferSdp = payload["sdp"] as? String
+            videoEnabled = payload["video"] as? Bool ?? false
             isCaller = false
             state = .incoming
 
@@ -241,6 +251,25 @@ final class CallService: NSObject, ObservableObject {
         localAudioTrack = track
     }
 
+    private func addLocalVideo(to pc: RTCPeerConnection) {
+        guard videoEnabled, let factory = factory else { return }
+        let source = factory.videoSource()
+        videoSource = source
+        let capturer = RTCCameraVideoCapturer(delegate: source)
+        self.capturer = capturer
+
+        let devices = RTCCameraVideoCapturer.captureDevices()
+        if let device = devices.first(where: { $0.position == .front }) ?? devices.first,
+           let format = RTCCameraVideoCapturer.supportedFormats(for: device).last {
+            let maxFps = format.videoSupportedFrameRateRanges.first?.maxFrameRate ?? 30
+            capturer.startCapture(with: device, format: format, fps: Int(min(30, maxFps)))
+            localSession = capturer.captureSession
+        }
+
+        let track = factory.videoTrack(with: source, trackId: "video0")
+        pc.add(track, streamIds: ["stream0"])
+    }
+
     private func setupAudioSession() {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
@@ -273,6 +302,12 @@ final class CallService: NSObject, ObservableObject {
     private func end(_ reason: String) {
         durationTimer?.invalidate()
         durationTimer = nil
+        capturer?.stopCapture()
+        capturer = nil
+        videoSource = nil
+        localSession = nil
+        remoteVideoTrack = nil
+        videoEnabled = false
         peerConnection?.close()
         peerConnection = nil
         localAudioTrack = nil
@@ -285,7 +320,12 @@ final class CallService: NSObject, ObservableObject {
 
 extension CallService: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
+        guard let video = stream.videoTracks.first else { return }
+        DispatchQueue.main.async {
+            self.remoteVideoTrack = video
+        }
+    }
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
     func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
 

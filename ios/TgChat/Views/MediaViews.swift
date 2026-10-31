@@ -144,6 +144,8 @@ struct MediaMessageView: View {
                     .cornerRadius(12)
                 }
                 .buttonStyle(.plain)
+            case "video_note":
+                VideoNoteView(media: media, token: token, colors: colors)
             case "voice":
                 VoiceMessageView(
                     message: message,

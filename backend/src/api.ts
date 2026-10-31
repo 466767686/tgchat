@@ -1017,7 +1017,7 @@ export async function handleRequest(
       if (size > 50 * 1024 * 1024) throw new ApiError(413, "文件不能超过 50MB", "too_large");
 
       const kindRaw = String(form.get("kind") ?? "file");
-      const kind = ["image", "video", "file", "voice", "sticker", "gif"].includes(kindRaw) ? kindRaw : "file";
+      const kind = ["image", "video", "file", "voice", "sticker", "gif", "video_note"].includes(kindRaw) ? kindRaw : "file";
       const mime = file.type || "application/octet-stream";
       const name = typeof form.get("name") === "string" ? String(form.get("name")) : (file.name || null);
       const width = intField(form.get("width"));
