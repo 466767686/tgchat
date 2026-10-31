@@ -39,6 +39,9 @@ struct ChatComposer: View {
     @Binding var replyTarget: Message?
     @Binding var editing: Message?
     var mentionUsers: [User] = []
+    var topicId: String? = nil
+    var allowPoll = false
+    var onCreatePoll: (() -> Void)? = nil
 
     @EnvironmentObject private var app: AppState
     @Environment(\.colorScheme) private var scheme
@@ -280,7 +283,14 @@ struct ChatComposer: View {
                             } else {
                                 let reply = replyTarget?.seq
                                 replyTarget = nil
-                                Task { await app.sendMessage(text, chatId: chatId, replyTo: reply) }
+                                Task {
+                                    await app.sendMessage(
+                                        text,
+                                        chatId: chatId,
+                                        replyTo: reply,
+                                        topicId: topicId
+                                    )
+                                }
                             }
                         } label: {
                             Image(systemName: "paperplane.fill")
@@ -300,6 +310,9 @@ struct ChatComposer: View {
         .confirmationDialog("发送", isPresented: $showAttachMenu, titleVisibility: .hidden) {
             Button("照片或视频") { showPhotoPicker = true }
             Button("文件") { showFilePicker = true }
+            if allowPoll {
+                Button("投票") { onCreatePoll?() }
+            }
             Button("取消", role: .cancel) {}
         }
         .photosPicker(

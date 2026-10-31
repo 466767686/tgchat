@@ -96,6 +96,8 @@ struct GroupInfoView: View {
     @State private var showAddMember = false
     @State private var confirmLeave = false
     @State private var confirmDissolve = false
+    @State private var showReports = false
+    @State private var reports: [ReportItem] = []
 
     private var chat: Chat? { app.chat(byId: chatId) }
     private var myId: String? { app.me?.id }
@@ -188,6 +190,60 @@ struct GroupInfoView: View {
                         }
                     }
 
+                    if chat.canManage {
+                        Section("群组设置") {
+                            Menu {
+                                ForEach([0, 5, 10, 30, 60, 300], id: \.self) { value in
+                                    Button(value == 0 ? "关闭" : "\(value) 秒") {
+                                        Task { await app.updateChat(chatId: chatId, fields: ["slowMode": value]) }
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    Text("慢速模式").foregroundColor(c.textPrimary)
+                                    Spacer()
+                                    Text(slowText(chat))
+                                        .font(.system(size: 13))
+                                        .foregroundColor(c.textTertiary)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(c.textTertiary)
+                                }
+                            }
+                            .listRowBackground(c.background)
+
+                            Toggle("隐藏历史消息", isOn: Binding(
+                                get: { chat.historyVisible == false },
+                                set: { value in
+                                    Task { await app.updateChat(chatId: chatId, fields: ["historyVisible": !value]) }
+                                }
+                            ))
+                            .listRowBackground(c.background)
+
+                            Toggle("话题模式", isOn: Binding(
+                                get: { chat.topicsEnabled == true },
+                                set: { value in
+                                    Task { await app.updateChat(chatId: chatId, fields: ["topicsEnabled": value]) }
+                                }
+                            ))
+                            .listRowBackground(c.background)
+
+                            Button {
+                                showReports = true
+                                Task { reports = await app.loadReports(chatId: chatId) }
+                            } label: {
+                                HStack {
+                                    Text("举报处理").foregroundColor(c.textPrimary)
+                                    Spacer()
+                                    Text("\(reports.filter { $0.status == "open" }.count) 条待处理")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(c.textTertiary)
+                                }
+                            }
+                            .listRowBackground(c.background)
+                        }
+                    }
+
                     Section("成员（\(chat.members.count)）") {
                         ForEach(chat.members) { member in
                             memberRow(member, chat: chat, colors: c)
@@ -248,6 +304,10 @@ struct GroupInfoView: View {
                 }
                 Button("取消", role: .cancel) {}
             }
+            .sheet(isPresented: $showReports) {
+                ReportsView(chatId: chatId)
+                    .environmentObject(app)
+            }
             .sheet(isPresented: $showAddMember) {
                 AddMemberView(chatId: chatId)
                     .environmentObject(app)
@@ -270,6 +330,13 @@ struct GroupInfoView: View {
                 }
                 Button("取消", role: .cancel) {}
             }
+        }
+    }
+
+    private func slowText(_ chat: Chat) -> String {
+        switch chat.slowMode ?? 0 {
+        case 0: return "关闭"
+        case let value: return "\(value) 秒"
         }
     }
 
@@ -439,6 +506,72 @@ struct MentionPickerView: View {
             .background(c.background.ignoresSafeArea())
             .navigationTitle("提及成员")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+
+struct ReportsView: View {
+    let chatId: String
+
+    @EnvironmentObject private var app: AppState
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
+
+    @State private var reports: [ReportItem] = []
+
+    var body: some View {
+        let c = TgColors(dark: scheme == .dark)
+
+        NavigationStack {
+            List {
+                if reports.isEmpty {
+                    Text("暂无举报").foregroundColor(c.textTertiary).listRowBackground(c.background)
+                }
+                ForEach(reports) { report in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("举报人：\(report.reporter)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(c.accent)
+                            Spacer()
+                            Text(report.status == "open" ? "待处理" : "已处理")
+                                .font(.system(size: 11))
+                                .foregroundColor(report.status == "open" ? c.danger : c.textTertiary)
+                        }
+                        Text("原因：\(report.reason)")
+                            .font(.system(size: 13))
+                            .foregroundColor(c.textPrimary)
+                        Text("消息：\(report.text.isEmpty ? "(非文本消息)" : report.text)")
+                            .font(.system(size: 13))
+                            .foregroundColor(c.textSecondary)
+                            .lineLimit(3)
+                        if report.status == "open" {
+                            Button("标记已处理") {
+                                Task {
+                                    try? await APIClient.shared.resolveReport(chatId: chatId, reportId: report.id)
+                                    reports = await app.loadReports(chatId: chatId)
+                                }
+                            }
+                            .font(.system(size: 12))
+                        }
+                    }
+                    .listRowBackground(c.background)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(c.background.ignoresSafeArea())
+            .navigationTitle("举报")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .task {
+                reports = await app.loadReports(chatId: chatId)
+            }
         }
     }
 }

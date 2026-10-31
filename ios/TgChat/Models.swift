@@ -60,6 +60,32 @@ struct Media: Codable, Identifiable, Hashable {
     }
 }
 
+struct PollOption: Codable, Hashable {
+    let index: Int
+    let text: String
+    var votes: Int
+}
+
+struct Poll: Codable, Hashable {
+    let id: String
+    let question: String
+    var options: [PollOption]
+    let multiple: Bool
+    let anonymous: Bool
+    var closed: Bool
+    var totalVotes: Int
+    var myVotes: [Int]
+}
+
+struct Topic: Codable, Identifiable, Hashable {
+    let id: String
+    let chatId: String
+    let title: String
+    let emoji: String?
+    var closed: Bool
+    var pinned: Bool
+}
+
 struct ReplyPreview: Codable, Hashable {
     let seq: Int64
     let senderName: String
@@ -89,6 +115,8 @@ struct Message: Codable, Identifiable, Hashable {
     var pinned: Bool = false
     var replyTo: ReplyPreview? = nil
     var reactions: [Reaction] = []
+    var topicId: String? = nil
+    var poll: Poll? = nil
 }
 
 struct Chat: Codable, Identifiable, Hashable {
@@ -106,6 +134,9 @@ struct Chat: Codable, Identifiable, Hashable {
     var photoUrl: String? = nil
     var joinMode: String? = nil
     var myRole: String? = nil
+    var slowMode: Int? = nil
+    var historyVisible: Bool? = nil
+    var topicsEnabled: Bool? = nil
 
     var isGroup: Bool { type != "direct" }
     var isOwner: Bool { myRole == "owner" }
@@ -148,6 +179,19 @@ struct ReactionsResponse: Codable { let reactions: [Reaction] }
 struct UsersResponse: Codable { let users: [User] }
 struct ChatResponse: Codable { let chat: Chat; let created: Bool? }
 struct InviteResponse: Codable { let code: String; let link: String }
+struct TopicsResponse: Codable { let topics: [Topic] }
+struct TopicResponse: Codable { let topic: Topic }
+struct PollResponse: Codable { let poll: Poll }
+struct ReportItem: Codable, Identifiable {
+    let id: String
+    let seq: Int64
+    let reporter: String
+    let reason: String
+    let text: String
+    let status: String
+    let createdAt: Int64
+}
+struct ReportsResponse: Codable { let reports: [ReportItem] }
 struct SimpleResponse: Codable { let ok: Bool? }
 struct CreateUserResponse: Codable { let user: User; let chatId: String? }
 struct ErrorResponse: Codable { let error: String?; let code: String? }

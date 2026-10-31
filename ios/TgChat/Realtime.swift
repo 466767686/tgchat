@@ -11,6 +11,7 @@ final class RealtimeClient {
     var onDelete: ((Int64) -> Void)?
     var onReaction: ((Int64, [Reaction]) -> Void)?
     var onPin: ((Int64, Bool) -> Void)?
+    var onPoll: ((Int64, Poll) -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private let session = URLSession(configuration: .default)
@@ -106,6 +107,13 @@ final class RealtimeClient {
                 reactions = (try? JSONDecoder().decode([Reaction].self, from: data)) ?? []
             }
             onReaction?(seq, reactions)
+        case "poll":
+            let seq = (object["seq"] as? NSNumber)?.int64Value ?? 0
+            if let raw = object["poll"],
+               let data = try? JSONSerialization.data(withJSONObject: raw),
+               let poll = try? JSONDecoder().decode(Poll.self, from: data) {
+                onPoll?(seq, poll)
+            }
         case "pin":
             onPin?((object["seq"] as? NSNumber)?.int64Value ?? 0, (object["pinned"] as? Bool) ?? false)
         default:

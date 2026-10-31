@@ -92,8 +92,12 @@ final class APIClient {
         try await request("/api/chats")
     }
 
-    func messages(chatId: String, before: Int64 = 0, limit: Int = 60) async throws -> MessagesResponse {
-        try await request("/api/chats/\(chatId)/messages?before=\(before)&limit=\(limit)")
+    func messages(chatId: String, before: Int64 = 0, limit: Int = 60, topicId: String? = nil) async throws -> MessagesResponse {
+        var path = "/api/chats/\(chatId)/messages?before=\(before)&limit=\(limit)"
+        if let topicId = topicId, !topicId.isEmpty {
+            path += "&topic=\(topicId)"
+        }
+        return try await request(path)
     }
 
     func sendMessage(
@@ -102,12 +106,14 @@ final class APIClient {
         clientId: String,
         mediaId: String? = nil,
         replyTo: Int64? = nil,
-        forwardedFrom: String? = nil
+        forwardedFrom: String? = nil,
+        topicId: String? = nil
     ) async throws -> MessageResponse {
         var body: [String: Any] = ["text": text, "clientId": clientId]
         if let mediaId = mediaId { body["mediaId"] = mediaId }
         if let replyTo = replyTo { body["replyTo"] = Int(replyTo) }
         if let forwardedFrom = forwardedFrom { body["forwardedFrom"] = forwardedFrom }
+        if let topicId = topicId { body["topicId"] = topicId }
         return try await request("/api/chats/\(chatId)/messages", method: "POST", body: body)
     }
 
@@ -136,6 +142,69 @@ final class APIClient {
             "/api/chats/\(chatId)/pin",
             method: "POST",
             body: ["seq": Int(seq), "pinned": pinned]
+        )
+    }
+
+    func topics(chatId: String) async throws -> TopicsResponse {
+        try await request("/api/chats/\(chatId)/topics")
+    }
+
+    func createTopic(chatId: String, title: String, emoji: String? = nil) async throws -> TopicResponse {
+        var body: [String: Any] = ["title": title]
+        if let emoji = emoji { body["emoji"] = emoji }
+        return try await request("/api/chats/\(chatId)/topics", method: "POST", body: body)
+    }
+
+    func updateTopic(chatId: String, topicId: String, fields: [String: Any]) async throws {
+        let _: SimpleResponse = try await request(
+            "/api/chats/\(chatId)/topics/\(topicId)",
+            method: "PATCH",
+            body: fields
+        )
+    }
+
+    func createPoll(
+        chatId: String,
+        question: String,
+        options: [String],
+        multiple: Bool,
+        anonymous: Bool = false,
+        topicId: String? = nil
+    ) async throws -> MessageResponse {
+        var body: [String: Any] = [
+            "question": question,
+            "options": options,
+            "multiple": multiple,
+            "anonymous": anonymous,
+        ]
+        if let topicId = topicId { body["topicId"] = topicId }
+        return try await request("/api/chats/\(chatId)/polls", method: "POST", body: body)
+    }
+
+    func votePoll(chatId: String, pollId: String, optionIndex: Int) async throws -> PollResponse {
+        try await request(
+            "/api/chats/\(chatId)/polls/\(pollId)/vote",
+            method: "POST",
+            body: ["optionIndex": optionIndex]
+        )
+    }
+
+    func reportMessage(chatId: String, seq: Int64, reason: String) async throws {
+        let _: SimpleResponse = try await request(
+            "/api/chats/\(chatId)/messages/\(seq)/report",
+            method: "POST",
+            body: ["reason": reason]
+        )
+    }
+
+    func reports(chatId: String) async throws -> ReportsResponse {
+        try await request("/api/chats/\(chatId)/reports")
+    }
+
+    func resolveReport(chatId: String, reportId: String) async throws {
+        let _: SimpleResponse = try await request(
+            "/api/chats/\(chatId)/reports/\(reportId)",
+            method: "POST"
         )
     }
 

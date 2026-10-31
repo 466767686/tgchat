@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS chats (
   announcement TEXT,
   photo_url  TEXT,
   join_mode  TEXT NOT NULL DEFAULT 'invite',   -- invite | open | approval
+  slow_mode  INTEGER NOT NULL DEFAULT 0,
+  history_visible INTEGER NOT NULL DEFAULT 1,
+  topics_enabled  INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   created_by TEXT
 );
@@ -39,6 +42,7 @@ CREATE TABLE IF NOT EXISTS chat_members (
   last_read_seq INTEGER NOT NULL DEFAULT 0,
   role          TEXT NOT NULL DEFAULT 'member', -- owner | admin | member
   muted_until   INTEGER,
+  joined_seq    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (chat_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_members_user ON chat_members(user_id);
@@ -53,6 +57,8 @@ CREATE TABLE IF NOT EXISTS messages (
   client_id  TEXT,
   media_id   TEXT,
   reply_to_seq    INTEGER,
+  topic_id        TEXT,
+  poll_id         TEXT,
   edited_at       INTEGER,
   deleted_at      INTEGER,
   forwarded_from  TEXT
@@ -101,6 +107,48 @@ CREATE TABLE IF NOT EXISTS chat_join_requests (
   user_id    TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   status     TEXT NOT NULL DEFAULT 'pending'
+);
+
+CREATE TABLE IF NOT EXISTS topics (
+  id         TEXT PRIMARY KEY,
+  chat_id    TEXT NOT NULL,
+  title      TEXT NOT NULL,
+  emoji      TEXT,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  closed     INTEGER NOT NULL DEFAULT 0,
+  pinned     INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS polls (
+  id         TEXT PRIMARY KEY,
+  chat_id    TEXT NOT NULL,
+  question   TEXT NOT NULL,
+  options    TEXT NOT NULL,
+  multiple   INTEGER NOT NULL DEFAULT 0,
+  anonymous  INTEGER NOT NULL DEFAULT 0,
+  closed     INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS poll_votes (
+  poll_id      TEXT NOT NULL,
+  user_id      TEXT NOT NULL,
+  option_index INTEGER NOT NULL,
+  created_at   INTEGER NOT NULL,
+  PRIMARY KEY (poll_id, user_id, option_index)
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+  id         TEXT PRIMARY KEY,
+  chat_id    TEXT NOT NULL,
+  message_id TEXT,
+  message_seq INTEGER,
+  reporter_id TEXT NOT NULL,
+  reason     TEXT,
+  created_at INTEGER NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'open'
 );
 
 CREATE TABLE IF NOT EXISTS pinned_messages (

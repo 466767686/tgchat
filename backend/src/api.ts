@@ -89,6 +89,57 @@ async function assertMember(env: Env, chatId: string, userId: string): Promise<v
   if (!(await isMember(env, chatId, userId))) throw new ApiError(403, "你不是该会话的成员", "forbidden");
 }
 
+async function withPolls(env: Env, rows: any[], mapped: any[], viewerId: string) {
+  const pollIds = rows.filter((row: any) => row.poll_id).map((row: any) => row.poll_id);
+  if (!pollIds.length) return mapped;
+  const placeholders = pollIds.map(() => "?").join(",");
+  const polls = await env.DB.prepare(`SELECT * FROM polls WHERE id IN (${placeholders})`).bind(...pollIds).all<any>();
+  const votes = await env.DB.prepare(
+    `SELECT poll_id, option_index, COUNT(*) AS n, MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS mine
+     FROM poll_votes WHERE poll_id IN (${placeholders})
+     GROUP BY poll_id, option_index`,
+  )
+    .bind(viewerId, ...pollIds)
+    .all<any>();
+
+  const byId = new Map<string, any>();
+  for (const poll of polls.results) {
+    let options: string[] = [];
+    try {
+      options = JSON.parse(poll.options);
+    } catch {
+      options = [];
+    }
+    byId.set(poll.id, {
+      id: poll.id,
+      question: poll.question,
+      options: options.map((text: string, index: number) => ({ index, text, votes: 0 })),
+      multiple: !!poll.multiple,
+      anonymous: !!poll.anonymous,
+      closed: !!poll.closed,
+      totalVotes: 0,
+      myVotes: [] as number[],
+    });
+  }
+  for (const vote of votes.results) {
+    const poll = byId.get(vote.poll_id);
+    if (!poll) continue;
+    if (poll.options[vote.option_index]) poll.options[vote.option_index].votes = vote.n;
+    poll.totalVotes += vote.n;
+    if (vote.mine) poll.myVotes.push(vote.option_index);
+  }
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].poll_id) mapped[i].poll = byId.get(rows[i].poll_id) ?? null;
+  }
+  return mapped;
+}
+
+async function decorate(env: Env, rows: any[], mapped: any[], viewerId: string) {
+  await withReactions(env, rows, mapped, viewerId);
+  await withPolls(env, rows, mapped, viewerId);
+  return mapped;
+}
+
 function mapMessage(row: any) {
   const deleted = !!row.deleted_at;
   return {
@@ -105,6 +156,8 @@ function mapMessage(row: any) {
     editedAt: row.edited_at ?? null,
     forwardedFrom: row.forwarded_from ?? null,
     pinned: !!row.pinned,
+    topicId: row.topic_id ?? null,
+    poll: null as any,
     replyTo: row.reply_to_seq
       ? {
           seq: row.reply_to_seq,
@@ -131,7 +184,7 @@ function mapMessage(row: any) {
 
 const MESSAGE_SELECT = `
   SELECT m.seq, m.id, m.chat_id, m.sender_id, m.text, m.created_at, m.client_id, m.media_id,
-         m.reply_to_seq, m.edited_at, m.deleted_at, m.forwarded_from,
+         m.reply_to_seq, m.edited_at, m.deleted_at, m.forwarded_from, m.topic_id, m.poll_id,
          u.display_name AS sender_name, u.avatar_color AS sender_color,
          md.kind AS media_kind, md.mime AS media_mime, md.size AS media_size,
          md.file_name AS media_name, md.width AS media_width, md.height AS media_height,
@@ -230,6 +283,9 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
     announcement: chat.announcement ?? null,
     photoUrl: chat.photo_url ?? null,
     joinMode: chat.join_mode ?? "invite",
+    slowMode: chat.slow_mode ?? 0,
+    historyVisible: (chat.history_visible ?? 1) === 1,
+    topicsEnabled: (chat.topics_enabled ?? 0) === 1,
     createdAt: chat.created_at,
     lastReadSeq: me?.last_read_seq ?? 0,
     otherReadSeq: otherRead?.n ?? 0,
@@ -444,6 +500,7 @@ export async function handleRequest(
 
     const rows = await env.DB.prepare(
       `SELECT c.id, c.type, c.title, c.description, c.announcement, c.photo_url, c.join_mode,
+              c.slow_mode, c.history_visible, c.topics_enabled,
               c.created_at, cm.last_read_seq, cm.role AS my_role,
               (SELECT MAX(cm2.last_read_seq) FROM chat_members cm2 WHERE cm2.chat_id = c.id AND cm2.user_id != ?) AS other_read_seq,
               (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.seq > cm.last_read_seq AND m.sender_id != ?) AS unread
@@ -502,6 +559,9 @@ export async function handleRequest(
       announcement: c.announcement ?? null,
       photoUrl: c.photo_url ?? null,
       joinMode: c.join_mode ?? "invite",
+      slowMode: c.slow_mode ?? 0,
+      historyVisible: (c.history_visible ?? 1) === 1,
+      topicsEnabled: (c.topics_enabled ?? 0) === 1,
       createdAt: c.created_at,
       myRole: c.my_role ?? "member",
       lastReadSeq: c.last_read_seq,
@@ -531,7 +591,9 @@ export async function handleRequest(
       .all<any>();
     if (found.results.length !== ids.length) throw new ApiError(400, "存在无效用户", "invalid_input");
 
-    if (ids.length === 1) {
+    const wantsGroup = ids.length > 1 || body.type === "group";
+
+    if (!wantsGroup) {
       const existing = await env.DB.prepare(
         `SELECT c.id FROM chats c
          JOIN chat_members a ON a.chat_id = c.id AND a.user_id = ?
@@ -547,6 +609,11 @@ export async function handleRequest(
 
     const title = typeof body.title === "string" && body.title.trim() ? text(body.title, "title", 1, 64) : "群聊";
     const chatId = await createChat(env, me.id, ids, "group", title);
+    if (typeof body.description === "string" && body.description.trim()) {
+      await env.DB.prepare("UPDATE chats SET description = ? WHERE id = ?")
+        .bind(body.description.trim().slice(0, 512), chatId)
+        .run();
+    }
     return json({ chat: await loadChat(env, chatId, me.id), created: true }, 201);
   }
 
@@ -566,10 +633,13 @@ export async function handleRequest(
       .bind(invite.chat_id, me.id)
       .first();
     if (!exists) {
+      const maxSeq = await env.DB.prepare("SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE chat_id = ?")
+        .bind(invite.chat_id)
+        .first<any>();
       await env.DB.prepare(
-        "INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq, role) VALUES (?, ?, ?, 0, 'member')",
+        "INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq, role, joined_seq) VALUES (?, ?, ?, 0, 'member', ?)",
       )
-        .bind(invite.chat_id, me.id, Date.now())
+        .bind(invite.chat_id, me.id, Date.now(), maxSeq?.s ?? 0)
         .run();
     }
     return json({ chat: await loadChat(env, invite.chat_id, me.id) });
@@ -602,6 +672,18 @@ export async function handleRequest(
     if (typeof body.joinMode === "string" && ["invite", "open", "approval"].includes(body.joinMode)) {
       fields.push("join_mode = ?");
       values.push(body.joinMode);
+    }
+    if (typeof body.slowMode === "number") {
+      fields.push("slow_mode = ?");
+      values.push(Math.max(0, Math.min(3600, Math.floor(body.slowMode))));
+    }
+    if (typeof body.historyVisible === "boolean") {
+      fields.push("history_visible = ?");
+      values.push(body.historyVisible ? 1 : 0);
+    }
+    if (typeof body.topicsEnabled === "boolean") {
+      fields.push("topics_enabled = ?");
+      values.push(body.topicsEnabled ? 1 : 0);
     }
     if (!fields.length) throw new ApiError(400, "没有可更新的字段", "invalid_input");
 
@@ -650,10 +732,13 @@ export async function handleRequest(
         .bind(chatId, userId)
         .first();
       if (!exists) {
+        const maxSeq = await env.DB.prepare("SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE chat_id = ?")
+          .bind(chatId)
+          .first<any>();
         await env.DB.prepare(
-          "INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq, role) VALUES (?, ?, ?, 0, 'member')",
+          "INSERT INTO chat_members (chat_id, user_id, joined_at, last_read_seq, role, joined_seq) VALUES (?, ?, ?, 0, 'member', ?)",
         )
-          .bind(chatId, userId, Date.now())
+          .bind(chatId, userId, Date.now(), maxSeq?.s ?? 0)
           .run();
       }
       return json({ chat: await loadChat(env, chatId, me.id) });
@@ -788,16 +873,33 @@ export async function handleRequest(
     if (method === "GET" && seg.length === 4 && seg[3] === "messages") {
       const me = await authenticate(request, env);
       await assertMember(env, chatId, me.id);
-      const url = new URL(request.url);
-      const before = parseInt(url.searchParams.get("before") ?? "0", 10) || 0;
-      const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 1), 100);
-      const rows = await env.DB.prepare(
-        `${MESSAGE_SELECT} WHERE m.chat_id = ? AND m.seq < ? ORDER BY m.seq DESC LIMIT ?`,
-      )
-        .bind(chatId, before > 0 ? before : Number.MAX_SAFE_INTEGER, limit)
-        .all<any>();
+      const params = new URL(request.url).searchParams;
+      const before = parseInt(params.get("before") ?? "0", 10) || 0;
+      const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "50", 10) || 50, 1), 100);
+      const topicParam = params.get("topic");
+
+      const chat = await getChatRow(env, chatId);
+      const member = await env.DB.prepare("SELECT role, joined_seq FROM chat_members WHERE chat_id = ? AND user_id = ?")
+        .bind(chatId, me.id)
+        .first<any>();
+      const minSeq = (chat.history_visible ?? 1) === 0 && member?.role === "member" ? (member.joined_seq ?? 0) : 0;
+
+      let sql = `${MESSAGE_SELECT} WHERE m.chat_id = ? AND m.seq < ? AND m.seq > ?`;
+      const bindings: unknown[] = [chatId, before > 0 ? before : Number.MAX_SAFE_INTEGER, minSeq];
+      if ((chat.topics_enabled ?? 0) === 1) {
+        if (topicParam) {
+          sql += " AND m.topic_id = ?";
+          bindings.push(topicParam);
+        } else {
+          sql += " AND m.topic_id IS NULL";
+        }
+      }
+      sql += " ORDER BY m.seq DESC LIMIT ?";
+      bindings.push(limit);
+
+      const rows = await env.DB.prepare(sql).bind(...bindings).all<any>();
       const mapped = rows.results.map(mapMessage);
-      await withReactions(env, rows.results, mapped, me.id);
+      await decorate(env, rows.results, mapped, me.id);
       const messages = mapped.reverse();
       return json({ messages, hasMore: rows.results.length === limit });
     }
@@ -813,8 +915,31 @@ export async function handleRequest(
       if (memberState?.muted_until && memberState.muted_until > Date.now()) {
         throw new ApiError(403, "你已被禁言", "muted");
       }
+      const chatRow = await getChatRow(env, chatId);
+      const myRole = await chatRole(env, chatId, me.id);
+      if ((chatRow.slow_mode ?? 0) > 0 && myRole === "member") {
+        const last = await env.DB.prepare(
+          "SELECT created_at FROM messages WHERE chat_id = ? AND sender_id = ? ORDER BY seq DESC LIMIT 1",
+        )
+          .bind(chatId, me.id)
+          .first<any>();
+        if (last) {
+          const waitMs = chatRow.slow_mode * 1000 - (Date.now() - last.created_at);
+          if (waitMs > 0) {
+            throw new ApiError(429, `慢速模式：请等待 ${Math.ceil(waitMs / 1000)} 秒`, "slow_mode");
+          }
+        }
+      }
+
       const body = await readBody(request);
       const mediaId = typeof body.mediaId === "string" && body.mediaId ? body.mediaId : null;
+      let topicId = typeof body.topicId === "string" && body.topicId ? body.topicId : null;
+      if (topicId) {
+        const topic = await env.DB.prepare("SELECT 1 AS x FROM topics WHERE id = ? AND chat_id = ?")
+          .bind(topicId, chatId)
+          .first();
+        if (!topic) topicId = null;
+      }
       const rawText = typeof body.text === "string" ? body.text.trim() : "";
       if (!rawText && !mediaId) throw new ApiError(400, "消息内容不能为空", "invalid_input");
       if (rawText.length > 4096) throw new ApiError(400, "消息内容过长", "invalid_input");
@@ -849,13 +974,13 @@ export async function handleRequest(
       const id = crypto.randomUUID();
       const now = Date.now();
       await env.DB.prepare(
-        "INSERT INTO messages (id, chat_id, sender_id, text, created_at, client_id, media_id, reply_to_seq, forwarded_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, chat_id, sender_id, text, created_at, client_id, media_id, reply_to_seq, forwarded_from, topic_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-        .bind(id, chatId, me.id, content, now, clientId, mediaId, replyTo, forwardedFrom)
+        .bind(id, chatId, me.id, content, now, clientId, mediaId, replyTo, forwardedFrom, topicId)
         .run();
       const row = await env.DB.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).bind(id).first<any>();
       const message = mapMessage(row);
-      await withReactions(env, [row], [message], me.id);
+      await decorate(env, [row], [message], me.id);
       await env.DB.prepare("UPDATE chat_members SET last_read_seq = MAX(last_read_seq, ?) WHERE chat_id = ? AND user_id = ?")
         .bind(message.seq, chatId, me.id)
         .run();
@@ -896,7 +1021,11 @@ export async function handleRequest(
         .bind(chatId, seq)
         .first<any>();
       if (!row) throw new ApiError(404, "消息不存在", "not_found");
-      if (row.sender_id !== me.id) throw new ApiError(403, "只能操作自己的消息", "forbidden");
+      const actorRole = await chatRole(env, chatId, me.id);
+      const canModerate = actorRole === "owner" || actorRole === "admin";
+      if (row.sender_id !== me.id && !canModerate) {
+        throw new ApiError(403, "只能操作自己的消息", "forbidden");
+      }
       if (row.deleted_at) throw new ApiError(400, "消息已删除", "invalid_input");
 
       if (method === "PATCH") {
@@ -909,7 +1038,7 @@ export async function handleRequest(
           .bind(chatId, seq)
           .first<any>();
         const message = mapMessage(updated);
-        await withReactions(env, [updated], [message], me.id);
+        await decorate(env, [updated], [message], me.id);
         await broadcast(env, ctx, chatId, { type: "edit", chatId, message });
         return json({ message });
       }
@@ -1000,8 +1129,231 @@ export async function handleRequest(
         .bind(chatId, `%${escaped}%`)
         .all<any>();
       const mapped = rows.results.map(mapMessage);
-      await withReactions(env, rows.results, mapped, me.id);
+      await decorate(env, rows.results, mapped, me.id);
       return json({ messages: mapped });
+    }
+
+    if (method === "GET" && seg.length === 4 && seg[3] === "topics") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const rows = await env.DB.prepare(
+        "SELECT * FROM topics WHERE chat_id = ? ORDER BY pinned DESC, created_at",
+      )
+        .bind(chatId)
+        .all<any>();
+      return json({
+        topics: rows.results.map((t: any) => ({
+          id: t.id,
+          chatId: t.chat_id,
+          title: t.title,
+          emoji: t.emoji ?? null,
+          closed: !!t.closed,
+          pinned: !!t.pinned,
+          createdBy: t.created_by,
+          createdAt: t.created_at,
+        })),
+      });
+    }
+
+    if (method === "POST" && seg.length === 4 && seg[3] === "topics") {
+      const me = await authenticate(request, env);
+      await requireManager(env, chatId, me.id);
+      const body = await readBody(request);
+      const topicTitle = text(body.title, "话题名称", 1, 64);
+      const emoji = typeof body.emoji === "string" ? body.emoji.slice(0, 8) : null;
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        "INSERT INTO topics (id, chat_id, title, emoji, created_by, created_at, closed, pinned) VALUES (?, ?, ?, ?, ?, ?, 0, 0)",
+      )
+        .bind(id, chatId, topicTitle, emoji, me.id, Date.now())
+        .run();
+      return json({ topic: { id, chatId, title: topicTitle, emoji, closed: false, pinned: false } }, 201);
+    }
+
+    if (method === "PATCH" && seg.length === 5 && seg[3] === "topics") {
+      const me = await authenticate(request, env);
+      await requireManager(env, chatId, me.id);
+      const body = await readBody(request);
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      if (typeof body.title === "string" && body.title.trim()) {
+        fields.push("title = ?");
+        values.push(body.title.trim().slice(0, 64));
+      }
+      if (body.closed !== undefined) {
+        fields.push("closed = ?");
+        values.push(body.closed ? 1 : 0);
+      }
+      if (body.pinned !== undefined) {
+        fields.push("pinned = ?");
+        values.push(body.pinned ? 1 : 0);
+      }
+      if (!fields.length) throw new ApiError(400, "没有可更新的字段", "invalid_input");
+      values.push(seg[4], chatId);
+      await env.DB.prepare(`UPDATE topics SET ${fields.join(", ")} WHERE id = ? AND chat_id = ?`).bind(...values).run();
+      return ok({ ok: true });
+    }
+
+    if (method === "POST" && seg.length === 4 && seg[3] === "polls") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const body = await readBody(request);
+      const question = text(body.question, "投票问题", 1, 300);
+      const rawOptions = Array.isArray(body.options) ? body.options : [];
+      const options = rawOptions
+        .map((item: unknown) => (typeof item === "string" ? item.trim().slice(0, 100) : ""))
+        .filter((item: string) => item.length > 0);
+      if (options.length < 2 || options.length > 10) {
+        throw new ApiError(400, "投票需要 2-10 个选项", "invalid_input");
+      }
+
+      const pollId = crypto.randomUUID();
+      const now = Date.now();
+      await env.DB.prepare(
+        "INSERT INTO polls (id, chat_id, question, options, multiple, anonymous, closed, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+      )
+        .bind(pollId, chatId, question, JSON.stringify(options), body.multiple ? 1 : 0, body.anonymous ? 1 : 0, me.id, now)
+        .run();
+
+      const id = crypto.randomUUID();
+      const topicId = typeof body.topicId === "string" && body.topicId ? body.topicId : null;
+      await env.DB.prepare(
+        "INSERT INTO messages (id, chat_id, sender_id, text, created_at, client_id, poll_id, topic_id) VALUES (?, ?, ?, '', ?, ?, ?, ?)",
+      )
+        .bind(id, chatId, me.id, now, `poll-${pollId}`, pollId, topicId)
+        .run();
+
+      const row = await env.DB.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).bind(id).first<any>();
+      const message = mapMessage(row);
+      await decorate(env, [row], [message], me.id);
+      await broadcast(env, ctx, chatId, { type: "message", chatId, message });
+      return json({ message }, 201);
+    }
+
+    if (method === "POST" && seg.length === 6 && seg[3] === "polls" && seg[5] === "vote") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const pollId = seg[4];
+      const body = await readBody(request);
+      const optionIndex = parseInt(String(body.optionIndex ?? ""), 10);
+      const poll = await env.DB.prepare("SELECT * FROM polls WHERE id = ? AND chat_id = ?").bind(pollId, chatId).first<any>();
+      if (!poll) throw new ApiError(404, "投票不存在", "not_found");
+      if (poll.closed) throw new ApiError(400, "投票已结束", "invalid_input");
+      const options: string[] = JSON.parse(poll.options);
+      if (!Number.isFinite(optionIndex) || optionIndex < 0 || optionIndex >= options.length) {
+        throw new ApiError(400, "无效的选项", "invalid_input");
+      }
+
+      const existing = await env.DB.prepare(
+        "SELECT 1 AS x FROM poll_votes WHERE poll_id = ? AND user_id = ? AND option_index = ?",
+      )
+        .bind(pollId, me.id, optionIndex)
+        .first();
+      if (existing) {
+        await env.DB.prepare("DELETE FROM poll_votes WHERE poll_id = ? AND user_id = ? AND option_index = ?")
+          .bind(pollId, me.id, optionIndex)
+          .run();
+      } else {
+        if (!poll.multiple) {
+          await env.DB.prepare("DELETE FROM poll_votes WHERE poll_id = ? AND user_id = ?").bind(pollId, me.id).run();
+        }
+        await env.DB.prepare(
+          "INSERT INTO poll_votes (poll_id, user_id, option_index, created_at) VALUES (?, ?, ?, ?)",
+        )
+          .bind(pollId, me.id, optionIndex, Date.now())
+          .run();
+      }
+
+      const messageRow = await env.DB.prepare(`${MESSAGE_SELECT} WHERE m.poll_id = ? LIMIT 1`).bind(pollId).first<any>();
+      const mappedRow = mapMessage(messageRow);
+      await decorate(env, [messageRow], [mappedRow], me.id);
+      await broadcast(env, ctx, chatId, {
+        type: "poll",
+        chatId,
+        seq: messageRow.seq,
+        poll: mappedRow.poll,
+      });
+      return json({ poll: mappedRow.poll });
+    }
+
+    if (method === "POST" && seg.length === 6 && seg[3] === "polls" && seg[5] === "close") {
+      const me = await authenticate(request, env);
+      await requireManager(env, chatId, me.id);
+      await env.DB.prepare("UPDATE polls SET closed = 1 WHERE id = ? AND chat_id = ?").bind(seg[4], chatId).run();
+      return ok({ ok: true });
+    }
+
+    if (method === "POST" && seg.length === 6 && seg[3] === "messages" && seg[5] === "report") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const seq = parseInt(seg[4], 10);
+      const target = await env.DB.prepare("SELECT id FROM messages WHERE chat_id = ? AND seq = ?").bind(chatId, seq).first<any>();
+      if (!target) throw new ApiError(404, "消息不存在", "not_found");
+      const body = await readBody(request);
+      const reason = typeof body.reason === "string" ? body.reason.slice(0, 500) : "";
+      await env.DB.prepare(
+        "INSERT INTO reports (id, chat_id, message_id, message_seq, reporter_id, reason, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'open')",
+      )
+        .bind(crypto.randomUUID(), chatId, target.id, seq, me.id, reason, Date.now())
+        .run();
+      return ok({ ok: true });
+    }
+
+    if (method === "GET" && seg.length === 4 && seg[3] === "reports") {
+      const me = await authenticate(request, env);
+      await requireManager(env, chatId, me.id);
+      const rows = await env.DB.prepare(
+        `SELECT r.*, u.display_name AS reporter_name, m.text AS message_text
+         FROM reports r
+         LEFT JOIN users u ON u.id = r.reporter_id
+         LEFT JOIN messages m ON m.id = r.message_id
+         WHERE r.chat_id = ? ORDER BY r.created_at DESC LIMIT 100`,
+      )
+        .bind(chatId)
+        .all<any>();
+      return json({
+        reports: rows.results.map((r: any) => ({
+          id: r.id,
+          seq: r.message_seq,
+          reporter: r.reporter_name ?? "",
+          reason: r.reason ?? "",
+          text: r.message_text ?? "",
+          status: r.status,
+          createdAt: r.created_at,
+        })),
+      });
+    }
+
+    if (method === "POST" && seg.length === 5 && seg[3] === "reports") {
+      const me = await authenticate(request, env);
+      await requireManager(env, chatId, me.id);
+      await env.DB.prepare("UPDATE reports SET status = 'resolved' WHERE id = ? AND chat_id = ?")
+        .bind(seg[4], chatId)
+        .run();
+      return ok({ ok: true });
+    }
+
+    if (method === "POST" && seg.length === 5 && seg[3] === "messages" && seg[4] === "batch-delete") {
+      const me = await authenticate(request, env);
+      const role = await chatRole(env, chatId, me.id);
+      if (!role) throw new ApiError(403, "你不是该会话的成员", "forbidden");
+      const isManager = role === "owner" || role === "admin";
+      const body = await readBody(request);
+      const seqs = Array.isArray(body.seqs) ? body.seqs.map((n: unknown) => Number(n)).filter(Number.isFinite) : [];
+      let deleted = 0;
+      for (const seq of seqs.slice(0, 200)) {
+        const target = await env.DB.prepare("SELECT * FROM messages WHERE chat_id = ? AND seq = ?")
+          .bind(chatId, seq)
+          .first<any>();
+        if (!target || target.deleted_at) continue;
+        if (target.sender_id !== me.id && !isManager) continue;
+        await env.DB.prepare("UPDATE messages SET deleted_at = ?, text = '' WHERE chat_id = ? AND seq = ?")
+          .bind(Date.now(), chatId, seq)
+          .run();
+        await broadcast(env, ctx, chatId, { type: "delete", chatId, seq });
+        deleted += 1;
+      }
+      return json({ deleted });
     }
 
     if (method === "POST" && seg.length === 4 && seg[3] === "read") {

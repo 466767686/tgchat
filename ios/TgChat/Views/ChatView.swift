@@ -20,8 +20,21 @@ struct ChatView: View {
     @State private var showSearch = false
     @State private var jumpToSeq: Int64?
     @State private var showGroupInfo = false
+    @State private var topics: [Topic] = []
+    @State private var selectedTopic: Topic?
+    @State private var showPollCreate = false
+    @State private var showTopicCreate = false
+    @State private var newTopicTitle = ""
+    @State private var reportTarget: Message?
 
-    private var messages: [Message] { app.messages[chat.id] ?? [] }
+    private var allMessages: [Message] { app.messages[chat.id] ?? [] }
+    private var messages: [Message] {
+        guard liveChat.topicsEnabled == true else { return allMessages }
+        if let selected = selectedTopic {
+            return allMessages.filter { $0.topicId == selected.id }
+        }
+        return allMessages.filter { $0.topicId == nil }
+    }
     private var liveChat: Chat { app.chat(byId: chat.id) ?? chat }
     private var me: User? { liveChat.members.first { $0.id == myId } }
     private var muted: Bool { me?.isMuted == true }
@@ -40,6 +53,10 @@ struct ChatView: View {
 
             if let pinned = pinnedMessage, !selectionMode {
                 pinnedBanner(pinned, c)
+            }
+
+            if liveChat.topicsEnabled == true, !selectionMode {
+                topicsBar(c)
             }
 
             messagesArea(c)
@@ -62,7 +79,10 @@ struct ChatView: View {
                     draft: $draft,
                     replyTarget: $replyTarget,
                     editing: $editing,
-                    mentionUsers: liveChat.isGroup ? liveChat.members.filter { $0.id != myId } : []
+                    mentionUsers: liveChat.isGroup ? liveChat.members.filter { $0.id != myId } : [],
+                    topicId: liveChat.topicsEnabled == true ? selectedTopic?.id : nil,
+                    allowPoll: liveChat.isGroup,
+                    onCreatePoll: { showPollCreate = true }
                 )
             }
         }
@@ -80,6 +100,40 @@ struct ChatView: View {
                 jumpToSeq = seq
             }
             .environmentObject(app)
+        }
+        .sheet(isPresented: $showPollCreate) {
+            PollCreateView(chatId: chat.id, topicId: selectedTopic?.id)
+                .environmentObject(app)
+        }
+        .alert("新建话题", isPresented: $showTopicCreate) {
+            TextField("话题名称", text: $newTopicTitle)
+            Button("创建") {
+                let title = newTopicTitle.trimmingCharacters(in: .whitespaces)
+                newTopicTitle = ""
+                guard !title.isEmpty else { return }
+                Task {
+                    if let topic = await app.createTopic(chatId: chat.id, title: title) {
+                        topics = await app.loadTopics(chatId: chat.id)
+                        selectedTopic = topic
+                        await app.loadTopic(chatId: chat.id, topicId: topic.id)
+                    }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        }
+        .confirmationDialog("举报原因", isPresented: Binding(
+            get: { reportTarget != nil },
+            set: { if !$0 { reportTarget = nil } }
+        ), titleVisibility: .visible) {
+            ForEach(["垃圾信息", "骚扰", "诈骗", "其他"], id: \.self) { reason in
+                Button(reason) {
+                    if let target = reportTarget {
+                        Task { await app.reportMessage(chatId: chat.id, seq: target.seq, reason: reason) }
+                    }
+                    reportTarget = nil
+                }
+            }
+            Button("取消", role: .cancel) { reportTarget = nil }
         }
         .sheet(isPresented: $showGroupInfo) {
             GroupInfoView(chatId: chat.id)
@@ -101,7 +155,12 @@ struct ChatView: View {
             .environmentObject(app)
         }
         .onAppear {
-            Task { await app.openChat(chat.id) }
+            Task {
+                await app.openChat(chat.id)
+                if liveChat.topicsEnabled == true {
+                    topics = await app.loadTopics(chatId: chat.id)
+                }
+            }
         }
         .onDisappear {
             app.closeChat()
@@ -198,6 +257,55 @@ struct ChatView: View {
 
     // MARK: - Messages
 
+    private func topicsBar(_ c: TgColors) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                topicChip(title: "大厅", emoji: nil, active: selectedTopic == nil, colors: c) {
+                    selectedTopic = nil
+                }
+                ForEach(topics) { topic in
+                    topicChip(
+                        title: topic.title,
+                        emoji: topic.emoji,
+                        active: selectedTopic?.id == topic.id,
+                        colors: c
+                    ) {
+                        selectedTopic = topic
+                        Task { await app.loadTopic(chatId: chat.id, topicId: topic.id) }
+                    }
+                }
+                if liveChat.canManage {
+                    Button {
+                        showTopicCreate = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(c.accent)
+                            .padding(.horizontal, 4)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .background(c.header)
+    }
+
+    private func topicChip(title: String, emoji: String?, active: Bool, colors c: TgColors, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let emoji = emoji { Text(emoji).font(.system(size: 12)) }
+                Text(title)
+                    .font(.system(size: 12, weight: active ? .semibold : .regular))
+            }
+            .foregroundColor(active ? .white : c.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(active ? c.accent : c.surfaceAlt))
+        }
+        .buttonStyle(.plain)
+    }
+
     private func messagesArea(_ c: TgColors) -> some View {
         ZStack {
             LinearGradient(colors: [c.chatBgTop, c.chatBgBottom], startPoint: .top, endPoint: .bottom)
@@ -266,7 +374,14 @@ struct ChatView: View {
                         .padding(.leading, 10)
                 }
 
-                if let media = message.media {
+                if let poll = message.poll {
+                    HStack {
+                        if isOut { Spacer(minLength: 44) }
+                        PollMessageView(message: message, poll: poll, colors: c)
+                        if !isOut { Spacer(minLength: 44) }
+                    }
+                    .padding(.horizontal, 10)
+                } else if let media = message.media {
                     HStack {
                         if isOut { Spacer(minLength: 44) }
                         MediaMessageView(
@@ -383,7 +498,15 @@ struct ChatView: View {
             }
         }
 
-        if message.senderId == myId && !message.deleted {
+        if message.senderId != myId && !message.deleted {
+            Button {
+                reportTarget = message
+            } label: {
+                Label("举报", systemImage: "exclamationmark.bubble")
+            }
+        }
+
+        if (message.senderId == myId || liveChat.canManage) && !message.deleted {
             Button(role: .destructive) {
                 Task { await app.deleteMessage(chatId: chat.id, seq: message.seq) }
             } label: {

@@ -265,7 +265,13 @@ final class AppState: ObservableObject {
 
     // MARK: - Messages
 
-    func sendMessage(_ text: String, chatId: String, replyTo: Int64? = nil, forwardedFrom: String? = nil) async {
+    func sendMessage(
+        _ text: String,
+        chatId: String,
+        replyTo: Int64? = nil,
+        forwardedFrom: String? = nil,
+        topicId: String? = nil
+    ) async {
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty, let me = me else { return }
         let clientId = UUID().uuidString
@@ -284,7 +290,8 @@ final class AppState: ObservableObject {
             createdAt: Int64(Date().timeIntervalSince1970 * 1000),
             clientId: clientId,
             forwardedFrom: forwardedFrom,
-            replyTo: localReply
+            replyTo: localReply,
+            topicId: topicId
         )
         messages[chatId] = (messages[chatId] ?? []) + [local]
         do {
@@ -351,6 +358,79 @@ final class AppState: ObservableObject {
         } catch {
             toast = error.localizedDescription
         }
+    }
+
+    // MARK: - Polls, topics, reports
+
+    func createPoll(chatId: String, question: String, options: [String], multiple: Bool, topicId: String?) async {
+        do {
+            let response = try await api.createPoll(
+                chatId: chatId,
+                question: question,
+                options: options,
+                multiple: multiple,
+                topicId: topicId
+            )
+            messages[chatId] = merge(messages[chatId] ?? [], [response.message])
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func votePoll(chatId: String, pollId: String, optionIndex: Int) async {
+        do {
+            let response = try await api.votePoll(chatId: chatId, pollId: pollId, optionIndex: optionIndex)
+            if var list = messages[chatId] {
+                for index in list.indices where list[index].poll?.id == pollId {
+                    list[index].poll = response.poll
+                }
+                messages[chatId] = list
+            }
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func reportMessage(chatId: String, seq: Int64, reason: String) async {
+        do {
+            try await api.reportMessage(chatId: chatId, seq: seq, reason: reason)
+            toast = "已举报，管理员会处理"
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func loadReports(chatId: String) async -> [ReportItem] {
+        do {
+            return try await api.reports(chatId: chatId).reports
+        } catch {
+            toast = error.localizedDescription
+            return []
+        }
+    }
+
+    func loadTopics(chatId: String) async -> [Topic] {
+        do {
+            return try await api.topics(chatId: chatId).topics
+        } catch {
+            return []
+        }
+    }
+
+    func createTopic(chatId: String, title: String) async -> Topic? {
+        do {
+            let topic = try await api.createTopic(chatId: chatId, title: title).topic
+            toast = "话题已创建"
+            return topic
+        } catch {
+            toast = error.localizedDescription
+            return nil
+        }
+    }
+
+    func loadTopic(chatId: String, topicId: String) async {
+        guard let response = try? await api.messages(chatId: chatId, topicId: topicId, limit: 60) else { return }
+        messages[chatId] = merge(messages[chatId] ?? [], response.messages)
     }
 
     // MARK: - Groups
@@ -609,6 +689,14 @@ final class AppState: ObservableObject {
                 guard let self = self, var list = self.messages[chatId],
                       let index = list.firstIndex(where: { $0.seq == seq }) else { return }
                 list[index].reactions = reactions
+                self.messages[chatId] = list
+            }
+        }
+        realtime.onPoll = { [weak self] seq, poll in
+            Task { @MainActor in
+                guard let self = self, var list = self.messages[chatId],
+                      let index = list.firstIndex(where: { $0.seq == seq }) else { return }
+                list[index].poll = poll
                 self.messages[chatId] = list
             }
         }
