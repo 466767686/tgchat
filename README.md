@@ -33,7 +33,9 @@ docs/     部署说明、API 文档、功能清单
 
 `ios/` 下是同一后端的 SwiftUI 客户端，包含登录、会话列表、聊天（实时收发 / 输入中 / 双勾）、新建会话、设置、用户管理。
 
-构建方式（不需要 Mac）：把仓库推到 GitHub，Actions 里的 **iOS unsigned IPA** 工作流会自动用 macOS runner 编译并上传 `TgChat-unsigned.ipa` 工件，下载后用自己的证书重签安装。
+构建方式（不需要 Mac）：仓库推到 GitHub 后，Actions 里的 **iOS unsigned IPA** 工作流会自动用 `macos-latest` runner 编译并上传 `TgChat-unsigned.ipa` 工件；本仓库的成品质检在 `dist/TgChat-1.0.0-unsigned.ipa`（34 KB，arm64，iOS 16+），用你自己的证书重签安装即可。
+
+> 注意：`macos-14` 标签在这个账号下会被立刻取消（镜像已下线），工作流固定使用 `macos-latest`。
 
 ```bash
 # 本地有 Mac 的话

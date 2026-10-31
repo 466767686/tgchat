@@ -110,6 +110,20 @@ POST /api/auth/login（错密码）→ 401
 OPTIONS /api/auth/login  → 204（CORS 预检）
 ```
 
+### iOS 客户端（GitHub Actions 云编译）
+
+`.github/workflows/ios.yml` 在 `macos-latest` 上执行：`brew install xcodegen` → `xcodegen generate` → `xcodebuild ... CODE_SIGNING_ALLOWED=NO` → 打包 `Payload/TgChat.app` → 上传 `TgChat-unsigned.ipa`。
+
+```text
+Run #41216505966  iOS unsigned IPA  →  success（6 个步骤全部通过）
+产物：TgChat-unsigned.ipa  351,593 bytes
+Payload/TgChat.app/TgChat   Mach-O 64-bit arm64 executable
+Info.plist: com.tgchat.app, 1.0.0 (1), MinimumOSVersion 16.0
+未签名（无 _CodeSignature），符合预期
+```
+
+试过 `macos-13` / `macos-14`：`macos-14` 的 job 启动即被取消（该镜像已退役），`macos-latest` 正常，因此工作流固定用 `macos-latest`。安卓与 iOS 客户端共用同一个后端（REST + WSS），无需额外服务端配置。
+
 ## 没有验证到的部分
 
 - **真机/模拟器上的 UI 运行**：这个构建环境没有可用的 Android 模拟器（aarch64 容器、无 KVM），也无法自动安装 APK。UI 的验证到「编译通过 + 资源打包正确 + 逻辑单测通过」为止。
