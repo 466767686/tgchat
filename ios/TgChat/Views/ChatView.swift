@@ -168,6 +168,7 @@ struct ChatView: View {
         .onAppear {
             Task {
                 await app.openChat(chat.id)
+                await app.refreshChat(chat.id)
                 if liveChat.topicsEnabled == true {
                     topics = await app.loadTopics(chatId: chat.id)
                 }

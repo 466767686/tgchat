@@ -223,9 +223,23 @@ final class AppState: ObservableObject {
         activeChatId = chatId
         typingName = nil
         if messages[chatId] == nil { messages[chatId] = [] }
+        await refreshChat(chatId)
         await loadMessages(chatId: chatId)
         connectRealtime(chatId)
         startChatPolling(chatId: chatId)
+    }
+
+    /// Pulls fresh metadata for one chat so `myRole`, members and settings are
+    /// never stale when a screen opens.
+    func refreshChat(_ chatId: String) async {
+        if let chat = try? await api.chat(id: chatId).chat {
+            replaceChat(chat)
+        }
+    }
+
+    func refreshActiveChat() async {
+        guard let chatId = activeChatId else { return }
+        await refreshChat(chatId)
     }
 
     func closeChat() {

@@ -1065,6 +1065,13 @@ export async function handleRequest(
     return json({ chat: await loadChat(env, invite.chat_id, me.id) });
   }
 
+  if (method === "GET" && seg.length === 3 && seg[0] === "api" && seg[1] === "chats") {
+    const me = await authenticate(request, env);
+    const chatId = seg[2];
+    await assertMember(env, chatId, me.id);
+    return json({ chat: await loadChat(env, chatId, me.id) });
+  }
+
   if (method === "PATCH" && seg.length === 3 && seg[0] === "api" && seg[1] === "chats") {
     const me = await authenticate(request, env);
     const chatId = seg[2];

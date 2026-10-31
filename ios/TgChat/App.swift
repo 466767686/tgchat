@@ -54,6 +54,10 @@ struct RootView: View {
             app.appActive = phase == .active
             if phase == .active {
                 KeepAliveAudio.shared.stop()
+                Task {
+                    await app.loadChats(silent: true)
+                    await app.refreshActiveChat()
+                }
             } else if app.isLoggedIn {
                 KeepAliveAudio.shared.start()
             }

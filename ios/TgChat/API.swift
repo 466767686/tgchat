@@ -88,6 +88,10 @@ final class APIClient {
         try await request("/api/me")
     }
 
+    func chat(id: String) async throws -> ChatResponse {
+        try await request("/api/chats/\(id)")
+    }
+
     func chats() async throws -> ChatsResponse {
         try await request("/api/chats")
     }

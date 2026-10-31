@@ -120,6 +120,20 @@ struct GroupInfoView: View {
 
         NavigationStack {
             List {
+                if chat == nil {
+                    Section {
+                        HStack(spacing: 8) {
+                            Spacer()
+                            ProgressView()
+                            Text("正在加载群组信息…")
+                                .font(.system(size: 13))
+                                .foregroundColor(c.textSecondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 20)
+                        .listRowBackground(c.background)
+                    }
+                }
                 if let chat = chat {
                     Section {
                         HStack(spacing: 14) {
@@ -303,6 +317,9 @@ struct GroupInfoView: View {
             .background(c.background.ignoresSafeArea())
             .navigationTitle("群组信息")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                await app.refreshChat(chatId)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
