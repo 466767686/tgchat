@@ -18,20 +18,6 @@ struct PickedMedia: Identifiable {
     var videoURL: URL?
 }
 
-private let emojiList: [String] = [
-    "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇",
-    "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚",
-    "😋", "😛", "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🥳",
-    "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "☹️", "😣", "😖",
-    "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯",
-    "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔",
-    "🤭", "🤫", "🤥", "😶", "😐", "😑", "😬", "🙄", "😯", "😦",
-    "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😵", "🤐", "🥴",
-    "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠", "😈", "👿",
-    "👍", "👎", "👏", "🙌", "🤝", "🙏", "💪", "✌️", "🤞", "👌",
-    "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💔", "❣️",
-    "🎉", "🎊", "🔥", "⭐️", "✨", "💯", "✅", "❌", "⚡️", "🌙",
-]
 
 struct ChatComposer: View {
     let chatId: String
@@ -52,8 +38,8 @@ struct ChatComposer: View {
     @State private var showFilePicker = false
     @State private var pickedItems: [PickedMedia] = []
     @State private var showMediaCompose = false
-    @State private var showEmoji = false
-    @State private var showStickers = false
+    @State private var showPanel = false
+    @State private var panelTab = 0
     @State private var showMentions = false
     @State private var showVideoNote = false
     @StateObject private var recorder = VoiceRecorder()
@@ -148,26 +134,19 @@ struct ChatComposer: View {
                 .padding(.vertical, 4)
             }
 
-            if showStickers {
-                StickerPanel(chatId: chatId)
-                    .environmentObject(app)
-            }
-
-            if showEmoji {
-                ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 8), spacing: 6) {
-                        ForEach(emojiList, id: \.self) { emoji in
-                            Text(emoji)
-                                .font(.system(size: 26))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 4)
-                                .onTapGesture { draft += emoji }
+            if showPanel {
+                StickerPanel(
+                    chatId: chatId,
+                    tab: $panelTab,
+                    onEmoji: { draft += $0 },
+                    onClose: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                            showPanel = false
                         }
                     }
-                    .padding(10)
-                }
-                .frame(height: 220)
-                .background(c.surfaceAlt)
+                )
+                .environmentObject(app)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             if recorder.isRecording {
@@ -242,29 +221,28 @@ struct ChatComposer: View {
                     }
 
                     Button {
-                        showStickers.toggle()
-                        if showStickers { showEmoji = false }
+                        togglePanel(1)
                     } label: {
                         Image(systemName: "face.dashed")
                             .font(.system(size: 19, weight: .medium))
-                            .foregroundColor(showStickers ? c.accent : c.textSecondary)
+                            .foregroundColor(showPanel && panelTab == 1 ? c.accent : c.textSecondary)
                             .frame(width: 30, height: 34)
                     }
 
                     Button {
-                        showEmoji.toggle()
-                        if showEmoji { showStickers = false }
+                        togglePanel(0)
                     } label: {
                         Image(systemName: "face.smiling")
                             .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(showEmoji ? c.accent : c.textSecondary)
+                            .foregroundColor(showPanel && panelTab == 0 ? c.accent : c.textSecondary)
                             .frame(width: 30, height: 34)
                     }
 
                     if draft.trimmingCharacters(in: .whitespaces).isEmpty {
                         Button {
-                            showEmoji = false
-                            showStickers = false
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                                showPanel = false
+                            }
                             recorder.start()
                         } label: {
                             Image(systemName: "mic.fill")
@@ -352,6 +330,17 @@ struct ChatComposer: View {
         .sheet(isPresented: $showMediaCompose) {
             MediaComposeSheet(items: pickedItems, chatId: chatId)
                 .environmentObject(app)
+        }
+    }
+
+    private func togglePanel(_ tab: Int) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+            if showPanel && panelTab == tab {
+                showPanel = false
+            } else {
+                showPanel = true
+                panelTab = tab
+            }
         }
     }
 

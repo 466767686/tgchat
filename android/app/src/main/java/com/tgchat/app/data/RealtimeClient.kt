@@ -23,6 +23,11 @@ class RealtimeClient {
         fun onTyping(userId: String, name: String)
         fun onRead(userId: String, seq: Long)
         fun onClosed()
+        fun onEdit(message: MessageDto) {}
+        fun onDelete(seq: Long) {}
+        fun onReaction(seq: Long, reactions: List<ReactionDto>) {}
+        fun onPin(seq: Long, pinned: Boolean) {}
+        fun onPoll(seq: Long, poll: PollDto) {}
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -89,6 +94,29 @@ class RealtimeClient {
                     obj["userId"]?.jsonPrimitive?.content ?: "",
                     obj["seq"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
                 )
+                "edit" -> obj["message"]?.let {
+                    listener.onEdit(json.decodeFromJsonElement(MessageDto.serializer(), it))
+                }
+                "delete" -> listener.onDelete(
+                    obj["seq"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                )
+                "reaction" -> listener.onReaction(
+                    obj["seq"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                    obj["reactions"]?.let {
+                        json.decodeFromJsonElement(
+                            kotlinx.serialization.builtins.ListSerializer(ReactionDto.serializer()),
+                            it,
+                        )
+                    } ?: emptyList(),
+                )
+                "pin" -> listener.onPin(
+                    obj["seq"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                    obj["pinned"]?.jsonPrimitive?.content?.toBoolean() ?: false,
+                )
+                "poll" -> obj["poll"]?.let { payload ->
+                    val seq = obj["seq"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                    listener.onPoll(seq, json.decodeFromJsonElement(PollDto.serializer(), payload))
+                }
                 else -> Unit
             }
         } catch (e: Exception) {

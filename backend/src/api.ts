@@ -859,6 +859,64 @@ export async function handleRequest(
     return ok({ ok: true });
   }
 
+  if (method === "POST" && path === "/api/stickers/resolve") {
+    await authenticate(request, env);
+    const body = await readBody(request);
+    const botToken = typeof body.token === "string" ? body.token.trim() : "";
+    let name = typeof body.name === "string" ? body.name.trim() : "";
+    const match = /(?:t\.me|telegram\.me)\/addstickers\/([A-Za-z0-9_]+)/i.exec(name);
+    if (match) name = match[1];
+    name = name.replace(/^@/, "");
+    if (!botToken) throw new ApiError(400, "缺少 Telegram 机器人 Token", "invalid_input");
+    if (!name) throw new ApiError(400, "缺少贴纸包名称", "invalid_input");
+
+    const res = await fetch(
+      `https://api.telegram.org/bot${botToken}/getStickerSet?name=${encodeURIComponent(name)}`,
+    );
+    const data: any = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) {
+      throw new ApiError(400, data?.description ?? "无法获取贴纸包", "telegram_error");
+    }
+    return json({
+      name: data.result.name,
+      title: data.result.title,
+      animated: !!data.result.is_animated,
+      video: !!data.result.is_video,
+      stickers: (data.result.stickers ?? []).map((s: any) => ({
+        fileId: s.file_id,
+        emoji: s.emoji ?? "",
+        animated: !!s.is_animated,
+        video: !!s.is_video,
+      })),
+    });
+  }
+
+  if (method === "POST" && path === "/api/stickers/file") {
+    await authenticate(request, env);
+    const body = await readBody(request);
+    const botToken = typeof body.token === "string" ? body.token.trim() : "";
+    const fileId = typeof body.fileId === "string" ? body.fileId.trim() : "";
+    if (!botToken || !fileId) throw new ApiError(400, "缺少参数", "invalid_input");
+
+    const metaRes = await fetch(
+      `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`,
+    );
+    const meta: any = await metaRes.json().catch(() => null);
+    if (!metaRes.ok || !meta?.ok) {
+      throw new ApiError(400, meta?.description ?? "无法获取贴纸文件", "telegram_error");
+    }
+    const filePath = meta.result.file_path;
+    const bin = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`);
+    if (!bin.ok) throw new ApiError(502, "贴纸下载失败", "telegram_error");
+
+    return new Response(bin.body, {
+      headers: {
+        "content-type": bin.headers.get("content-type") ?? "application/octet-stream",
+        "cache-control": "private, max-age=86400",
+      },
+    });
+  }
+
   if (method === "POST" && path === "/api/channels") {
     const me = await authenticate(request, env);
     const body = await readBody(request);

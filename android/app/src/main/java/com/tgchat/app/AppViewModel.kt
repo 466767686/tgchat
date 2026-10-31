@@ -1,6 +1,9 @@
 package com.tgchat.app
 
 import android.app.Application
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -9,13 +12,19 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tgchat.app.data.ApiClient
 import com.tgchat.app.data.ChatDto
+import com.tgchat.app.data.MediaDto
 import com.tgchat.app.data.MessageDto
+import com.tgchat.app.data.PollDto
+import com.tgchat.app.data.ReactionDto
+import com.tgchat.app.data.ReplyPreviewDto
 import com.tgchat.app.data.RealtimeClient
 import com.tgchat.app.data.SessionStore
 import com.tgchat.app.data.UserDto
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -58,6 +67,16 @@ data class UiMessage(
     val text: String,
     val createdAt: Long,
     val status: MessageStatus = MessageStatus.SENT,
+    val media: MediaDto? = null,
+    val replyTo: ReplyPreviewDto? = null,
+    val editedAt: Long? = null,
+    val deleted: Boolean = false,
+    val forwardedFrom: String? = null,
+    val pinned: Boolean = false,
+    val reactions: List<ReactionDto> = emptyList(),
+    val poll: PollDto? = null,
+    val views: Int? = null,
+    val topicId: String? = null,
 )
 
 data class ChatUi(
@@ -72,7 +91,22 @@ data class ChatUi(
     val unread: Int,
     val otherReadSeq: Long,
     val members: List<UserDto>,
-)
+    val type: String = "direct",
+    val pinned: Boolean = false,
+    val archived: Boolean = false,
+    val folderId: String? = null,
+    val wallpaper: String? = null,
+    val myRole: String? = null,
+    val description: String? = null,
+    val announcement: String? = null,
+    val slowMode: Int = 0,
+    val topicsEnabled: Boolean = false,
+    val autoDeleteSeconds: Int = 0,
+) {
+    val isChannel: Boolean get() = type == "channel"
+    val isSaved: Boolean get() = type == "saved"
+    val canManage: Boolean get() = myRole == "owner" || myRole == "admin"
+}
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -434,7 +468,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun sendMessage(text: String) {
+    fun sendMessage(text: String, replyTo: Long? = null) {
         val chatId = activeChatId ?: return
         val content = text.trim()
         if (content.isEmpty()) return
@@ -450,6 +484,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             text = content,
             createdAt = System.currentTimeMillis(),
             status = MessageStatus.SENDING,
+            replyTo = replyTo?.let { seq ->
+                messagesCache[chatId]?.firstOrNull { it.seq == seq }?.let {
+                    ReplyPreviewDto(seq = seq, senderName = it.senderName, text = it.text)
+                }
+            },
         )
         val list = (messagesCache[chatId] ?: emptyList()) + local
         messagesCache[chatId] = list
@@ -457,7 +496,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
         scope.launch {
             try {
-                val resp = api.sendMessage(chatId, content, clientId)
+                val resp = api.sendMessage(chatId, content, clientId, replyTo = replyTo)
                 applyIncoming(chatId, resp.message)
             } catch (e: Exception) {
                 updateStatus(chatId, clientId, MessageStatus.FAILED)
@@ -593,6 +632,46 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
 
+                override fun onEdit(message: MessageDto) {
+                    scope.launch { applyIncoming(chatId, message) }
+                }
+
+                override fun onDelete(seq: Long) {
+                    scope.launch {
+                        messagesCache[chatId] = (messagesCache[chatId] ?: emptyList()).map {
+                            if (it.seq == seq) it.copy(deleted = true, text = "", media = null) else it
+                        }
+                        if (activeChatId == chatId) activeMessages = messagesCache[chatId] ?: emptyList()
+                    }
+                }
+
+                override fun onReaction(seq: Long, reactions: List<ReactionDto>) {
+                    scope.launch {
+                        messagesCache[chatId] = (messagesCache[chatId] ?: emptyList()).map {
+                            if (it.seq == seq) it.copy(reactions = reactions) else it
+                        }
+                        if (activeChatId == chatId) activeMessages = messagesCache[chatId] ?: emptyList()
+                    }
+                }
+
+                override fun onPin(seq: Long, pinned: Boolean) {
+                    scope.launch {
+                        messagesCache[chatId] = (messagesCache[chatId] ?: emptyList()).map {
+                            if (it.seq == seq) it.copy(pinned = pinned) else it
+                        }
+                        if (activeChatId == chatId) activeMessages = messagesCache[chatId] ?: emptyList()
+                    }
+                }
+
+                override fun onPoll(seq: Long, poll: PollDto) {
+                    scope.launch {
+                        messagesCache[chatId] = (messagesCache[chatId] ?: emptyList()).map {
+                            if (it.seq == seq) it.copy(poll = poll) else it
+                        }
+                        if (activeChatId == chatId) activeMessages = messagesCache[chatId] ?: emptyList()
+                    }
+                }
+
                 override fun onClosed() {
                     scope.launch {
                         delay(2500)
@@ -674,6 +753,149 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         adminError = null
     }
 
+    fun editMessage(seq: Long, text: String) {
+        val chatId = activeChatId ?: return
+        val content = text.trim()
+        if (content.isEmpty()) return
+        scope.launch {
+            try {
+                val resp = api.editMessage(chatId, seq, content)
+                applyIncoming(chatId, resp.message)
+            } catch (e: Exception) {
+                toast = e.message
+            }
+        }
+    }
+
+    fun deleteMessage(seq: Long) {
+        val chatId = activeChatId ?: return
+        scope.launch {
+            try {
+                api.deleteMessage(chatId, seq)
+                messagesCache[chatId] = (messagesCache[chatId] ?: emptyList()).map {
+                    if (it.seq == seq) it.copy(deleted = true, text = "", media = null) else it
+                }
+                activeMessages = messagesCache[chatId] ?: emptyList()
+            } catch (e: Exception) {
+                toast = e.message
+            }
+        }
+    }
+
+    fun toggleReaction(seq: Long, emoji: String) {
+        val chatId = activeChatId ?: return
+        scope.launch {
+            try {
+                val resp = api.toggleReaction(chatId, seq, emoji)
+                messagesCache[chatId] = (messagesCache[chatId] ?: emptyList()).map {
+                    if (it.seq == seq) it.copy(reactions = resp.reactions) else it
+                }
+                activeMessages = messagesCache[chatId] ?: emptyList()
+            } catch (e: Exception) {
+                toast = e.message
+            }
+        }
+    }
+
+    fun pinMessage(seq: Long, pinned: Boolean) {
+        val chatId = activeChatId ?: return
+        scope.launch {
+            try {
+                api.pinMessage(chatId, seq, pinned)
+                messagesCache[chatId] = (messagesCache[chatId] ?: emptyList()).map {
+                    if (it.seq == seq) it.copy(pinned = pinned) else it
+                }
+                activeMessages = messagesCache[chatId] ?: emptyList()
+            } catch (e: Exception) {
+                toast = e.message
+            }
+        }
+    }
+
+    fun sendMedia(uri: Uri, kind: String) {
+        val chatId = activeChatId ?: return
+        scope.launch {
+            try {
+                val resolver = getApplication<Application>().contentResolver
+                val mime = resolver.getType(uri) ?: "application/octet-stream"
+                val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                } ?: when (kind) {
+                    "image" -> "photo.jpg"
+                    "video" -> "video.mp4"
+                    else -> "file"
+                }
+                val bytes = withContext(Dispatchers.IO) {
+                    resolver.openInputStream(uri)?.use { it.readBytes() }
+                } ?: run {
+                    toast = "无法读取文件"
+                    return@launch
+                }
+
+                var width: Int? = null
+                var height: Int? = null
+                if (kind == "image") {
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                    width = options.outWidth.takeIf { it > 0 }
+                    height = options.outHeight.takeIf { it > 0 }
+                }
+
+                val media = api.uploadMedia(chatId, bytes, name, mime, kind, width, height).media
+                val resp = api.sendMessage(chatId, "", UUID.randomUUID().toString(), mediaId = media.id)
+                applyIncoming(chatId, resp.message)
+            } catch (e: Exception) {
+                toast = e.message
+            }
+        }
+    }
+
+    fun createGroup(title: String, memberIds: List<String>): Job = scope.launch {
+        try {
+            val chat = api.createGroup(title, memberIds).chat
+            refreshChats(silent = false)
+            enterChat(chat.id)
+        } catch (e: Exception) {
+            toast = e.message
+        }
+    }
+
+    fun createChannel(title: String, username: String?, description: String): Job = scope.launch {
+        try {
+            val chat = api.createChannel(title, username, description).chat
+            refreshChats(silent = false)
+            enterChat(chat.id)
+        } catch (e: Exception) {
+            toast = e.message
+        }
+    }
+
+    fun batchChats(action: String, chatIds: List<String>): Job = scope.launch {
+        try {
+            api.batchChats(action, chatIds)
+            refreshChats(silent = true)
+        } catch (e: Exception) {
+            toast = e.message
+        }
+    }
+
+    fun updateChatFields(chatId: String, fields: Map<String, Any?>): Job = scope.launch {
+        try {
+            api.updateChat(chatId, fields)
+            refreshChats(silent = true)
+        } catch (e: Exception) {
+            toast = e.message
+        }
+    }
+
+    fun updateProfile(fields: Map<String, Any?>): Job = scope.launch {
+        try {
+            me = api.updateProfile(fields).user
+        } catch (e: Exception) {
+            toast = e.message
+        }
+    }
+
     // --------------------------------------------------------------- mappers
 
     private fun MessageDto.toUi(): UiMessage = UiMessage(
@@ -687,6 +909,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         text = text,
         createdAt = createdAt,
         status = MessageStatus.SENT,
+        media = media,
+        replyTo = replyTo,
+        editedAt = editedAt,
+        deleted = deleted,
+        forwardedFrom = forwardedFrom,
+        pinned = pinned,
+        reactions = reactions,
+        poll = poll,
+        views = views,
+        topicId = topicId,
     )
 
     private fun ChatDto.toChatUi(myId: String?): ChatUi {
@@ -712,6 +944,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             unread = unread,
             otherReadSeq = otherReadSeq,
             members = members,
+            type = type,
+            pinned = pinned,
+            archived = archived,
+            folderId = folderId,
+            wallpaper = wallpaper,
+            myRole = myRole,
+            description = description,
+            announcement = announcement,
+            slowMode = slowMode ?: 0,
+            topicsEnabled = topicsEnabled ?: false,
+            autoDeleteSeconds = autoDeleteSeconds ?: 0,
         )
     }
 }

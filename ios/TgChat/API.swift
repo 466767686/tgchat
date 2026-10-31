@@ -201,6 +201,34 @@ final class APIClient {
         try await request("/api/chats/\(chatId)/reports")
     }
 
+    func resolveStickerSet(token: String, name: String) async throws -> StickerSetResponse {
+        try await request(
+            "/api/stickers/resolve",
+            method: "POST",
+            body: ["token": token, "name": name]
+        )
+    }
+
+    func stickerFile(token botToken: String, fileId: String) async throws -> Data {
+        guard let url = url(for: "/api/stickers/file") else { throw ApiError.network("服务器地址无效") }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["token": botToken, "fileId": fileId])
+        if let token = token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            if let message = try? JSONDecoder().decode(ErrorResponse.self, from: data).error {
+                throw ApiError.server(message)
+            }
+            throw ApiError.server("贴纸下载失败")
+        }
+        return data
+    }
+
     func resolveReport(chatId: String, reportId: String) async throws {
         let _: SimpleResponse = try await request(
             "/api/chats/\(chatId)/reports/\(reportId)",

@@ -129,7 +129,6 @@ struct MessageBubbleView: View {
                         .font(.system(size: 16))
                         .foregroundColor(isOut ? colors.bubbleOutText : colors.bubbleInText)
                         .tint(colors.accent)
-                        .frame(maxWidth: 280, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 

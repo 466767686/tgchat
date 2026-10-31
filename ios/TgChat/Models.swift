@@ -228,6 +228,21 @@ struct SessionInfo: Codable, Identifiable, Hashable {
     let current: Bool
 }
 struct SessionsResponse: Codable { let sessions: [SessionInfo] }
+
+struct TelegramSticker: Codable, Hashable {
+    let fileId: String
+    let emoji: String?
+    let animated: Bool
+    let video: Bool
+}
+
+struct StickerSetResponse: Codable {
+    let name: String
+    let title: String
+    let animated: Bool
+    let video: Bool
+    let stickers: [TelegramSticker]
+}
 struct UserResponse: Codable { let user: User }
 struct FolderResponse: Codable { let folder: Folder }
 struct TopicResponse: Codable { let topic: Topic }
