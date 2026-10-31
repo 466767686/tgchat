@@ -19,8 +19,8 @@ export async function broadcast(
 
 export interface Attachment {
   userId: string;
-  name: string;
-  color: string;
+  name?: string;
+  color?: string;
 }
 
 /**
@@ -100,6 +100,83 @@ export class ChatHub {
         break;
       default:
         break;
+    }
+  }
+
+  async webSocketClose(ws: WebSocket): Promise<void> {
+    try {
+      ws.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    try {
+      ws.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * One Durable Object instance per user. Holds the single "global" WebSocket an
+ * app keeps in the background (Android foreground service, future iOS push
+ * fallback) and fans out new messages for every conversation of that user.
+ */
+export class UserHub {
+  constructor(private ctx: DurableObjectState, private env: Env) {}
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/broadcast") {
+      const payload = await request.json();
+      this.broadcast(payload);
+      return new Response("ok");
+    }
+
+    const upgrade = request.headers.get("Upgrade");
+    if (!upgrade || upgrade.toLowerCase() !== "websocket") {
+      return new Response("Expected WebSocket upgrade", { status: 426 });
+    }
+
+    const userId = request.headers.get("x-user-id");
+    if (!userId) return new Response("Unauthorized", { status: 401 });
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ userId } satisfies Attachment);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private broadcast(payload: unknown): void {
+    const data = JSON.stringify(payload);
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(data);
+      } catch {
+        // socket already closed
+      }
+    }
+  }
+
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (typeof message !== "string") return;
+    let data: { type?: string };
+    try {
+      data = JSON.parse(message);
+    } catch {
+      return;
+    }
+    if (data.type === "ping") {
+      try {
+        ws.send(JSON.stringify({ type: "pong", t: Date.now() }));
+      } catch {
+        /* ignore */
+      }
     }
   }
 

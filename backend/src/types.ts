@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
   CHAT_HUB: DurableObjectNamespace;
+  USER_HUB: DurableObjectNamespace;
   SESSION_TTL_DAYS?: string;
   PBKDF2_ITERATIONS?: string;
 }

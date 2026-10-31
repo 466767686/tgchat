@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import com.tgchat.app.push.RealtimeService
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,6 +81,23 @@ fun TelegramApp(vm: AppViewModel) {
                     WindowCompat.getInsetsController(activity.window, view).isAppearanceLightStatusBars = !dark
                     WindowCompat.getInsetsController(activity.window, view).isAppearanceLightNavigationBars = !dark
                 }
+            }
+        }
+
+        val appContext = context.applicationContext
+        LaunchedEffect(vm.token, vm.baseUrl) {
+            val token = vm.token
+            if (token != null) {
+                runCatching { RealtimeService.start(appContext, vm.baseUrl, token) }
+            } else {
+                runCatching { RealtimeService.stopAndClear(appContext) }
+            }
+        }
+        LaunchedEffect(vm.token, vm.chats) {
+            val pending = PendingNavigation.chatId
+            if (pending != null && vm.token != null && vm.chats.any { it.id == pending }) {
+                PendingNavigation.chatId = null
+                vm.openChat(pending)
             }
         }
 

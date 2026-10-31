@@ -426,6 +426,28 @@ export async function handleRequest(
         .run();
 
       await broadcast(env, ctx, chatId, { type: "message", chatId, message });
+
+      // Fan out to every other member's personal channel (background service /
+      // push notifications). Each recipient has a single UserHub instance.
+      const recipients = await env.DB.prepare(
+        "SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ?",
+      )
+        .bind(chatId, me.id)
+        .all<{ user_id: string }>();
+      const payload = JSON.stringify({ type: "message", chatId, message });
+      for (const row of recipients.results) {
+        const stub = env.USER_HUB.get(env.USER_HUB.idFromName(row.user_id));
+        ctx.waitUntil(
+          stub
+            .fetch("https://hub/broadcast", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: payload,
+            })
+            .catch(() => undefined),
+        );
+      }
+
       return json({ message }, 201);
     }
 

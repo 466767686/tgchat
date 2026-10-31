@@ -62,7 +62,8 @@ Base URL：`https://<你的 Worker 域名>`，所有接口以 `/api` 开头。
 | POST | `/api/chats/:id/messages` | 成员 | 发送消息 |
 | POST | `/api/chats/:id/read` | 成员 | 上报已读游标 |
 | GET | `/api/chats/:id/members` | 成员 | 会话成员 |
-| GET | `/api/ws?chat=&token=` | 成员 | WebSocket 实时通道 |
+| GET | `/api/ws?chat=&token=` | 成员 | 单会话 WebSocket 实时通道 |
+| GET | `/api/ws?user=1&token=` | 登录 | 用户级 WebSocket：一个连接收所有会话（后台服务用） |
 | GET | `/api/admin/users` | 管理员 | 账号列表 |
 | POST | `/api/admin/users` | 管理员 | 创建账号 |
 | POST | `/api/admin/users/:id/reset-password` | 管理员 | 重置密码 |
@@ -176,6 +177,11 @@ token 有效期由 `SESSION_TTL_DAYS` 控制（默认 30 天）；服务端只�
 游标只增不减。返回 `{"ok":true,"seq":42}`。
 
 ## 实时通道
+
+### GET /api/ws?user=1&token=<token>（用户级 WebSocket）
+
+一个连接即可收到该用户所有会话的新消息，用于安卓后台常驻服务 / 未来的推送兜底。
+事件格式与下面相同；消息体额外带 `chatId`（本来就有）。每个用户一个 `UserHub` Durable Object。
 
 ### GET /api/ws?chat=<chatId>&token=<token>（WebSocket）
 

@@ -23,6 +23,14 @@ database_id = "66bd610a-f6ed-4189-8812-08d441a487e4"
 name = "CHAT_HUB"
 class_name = "ChatHub"
 
+[[durable_objects.bindings]]
+name = "USER_HUB"
+class_name = "UserHub"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ChatHub"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["UserHub"]

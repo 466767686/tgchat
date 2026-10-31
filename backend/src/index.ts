@@ -1,9 +1,9 @@
 import { ApiError, handleRequest } from "./api";
-import { ChatHub } from "./hub";
+import { ChatHub, UserHub } from "./hub";
 import { sha256Hex } from "./crypto";
 import type { Env, UserRow } from "./types";
 
-export { ChatHub };
+export { ChatHub, UserHub };
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -52,10 +52,18 @@ export default {
       }
       const token = url.searchParams.get("token") ?? "";
       const chatId = url.searchParams.get("chat") ?? "";
-      if (!token || !chatId) return errorResponse(401, "缺少 token 或 chat 参数", "unauthorized");
+      const userScoped = url.searchParams.get("user") === "1";
+      if (!token || (!chatId && !userScoped)) return errorResponse(401, "缺少 token 或 chat 参数", "unauthorized");
 
       const user = await sessionUser(env, token);
       if (!user) return errorResponse(401, "登录已过期，请重新登录", "unauthorized");
+
+      if (userScoped) {
+        const stub = env.USER_HUB.get(env.USER_HUB.idFromName(user.id));
+        const headers = new Headers(request.headers);
+        headers.set("x-user-id", user.id);
+        return stub.fetch(new Request("https://hub/ws", { headers, method: "GET" }));
+      }
 
       const member = await env.DB.prepare("SELECT 1 AS x FROM chat_members WHERE chat_id = ? AND user_id = ?")
         .bind(chatId, user.id)
