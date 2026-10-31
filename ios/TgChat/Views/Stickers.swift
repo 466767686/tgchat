@@ -161,6 +161,7 @@ struct StickerPanel: View {
     @State private var selectedPack = "faces"
     @State private var recents: [String] = StickerStore.recent()
     @State private var recentGifIds: [String] = StickerStore.recentGifs()
+    @State private var gifQuery = ""
 
     var body: some View {
         let c = TgColors(dark: scheme == .dark)
@@ -228,9 +229,27 @@ struct StickerPanel: View {
         .background(c.background)
     }
 
+    private var filteredGifs: [GifItem] {
+        let query = gifQuery.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return StickerStore.gifs }
+        return StickerStore.gifs.filter { item in
+            item.title.localizedCaseInsensitiveContains(query) ||
+                item.tags.contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
+
     @ViewBuilder
     private func gifContent(_ c: TgColors) -> some View {
-        if !recentGifIds.isEmpty {
+        TextField("搜索 GIF", text: $gifQuery)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .font(.system(size: 13))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 10).fill(c.background))
+            .padding(.horizontal, 16)
+
+        if !recentGifIds.isEmpty && gifQuery.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     Text("最近")
@@ -247,7 +266,7 @@ struct StickerPanel: View {
 
         ScrollView {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-                ForEach(StickerStore.gifs) { item in
+                ForEach(filteredGifs) { item in
                     Button {
                         sendGif(item)
                     } label: {
