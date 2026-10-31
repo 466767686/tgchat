@@ -29,7 +29,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if app.disguiseEnabled && app.locked {
-                CalculatorView()
+                NoteDisguiseView()
             } else if app.booting {
                 SplashView()
             } else if app.isLoggedIn {

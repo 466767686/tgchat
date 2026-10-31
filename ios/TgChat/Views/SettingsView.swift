@@ -97,13 +97,18 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("计算器伪装", isOn: Binding(
+                    Toggle("便笺伪装", isOn: Binding(
                         get: { app.disguiseEnabled },
                         set: { app.setDisguise($0) }
                     ))
                     .listRowBackground(c.background)
 
                     if app.disguiseEnabled {
+                        Text("进入方式：右上角月亮连点 5 次")
+                            .font(.system(size: 12))
+                            .foregroundColor(c.textTertiary)
+                            .listRowBackground(c.background)
+
                         Button {
                             pinDraft = ""
                             showPin = true
@@ -180,7 +185,7 @@ struct SettingsView: View {
                 }
                 Button("取消", role: .cancel) { pinDraft = "" }
             } message: {
-                Text("在计算器上输入该密码后按 = 即可进入聊天")
+                Text("进入方式：在便笺右上角连续点击月亮 5 次，输入密码；也可以直接在搜索框输入密码。")
             }
             .confirmationDialog("退出登录", isPresented: $showLogout, titleVisibility: .visible) {
                 Button("退出", role: .destructive) {

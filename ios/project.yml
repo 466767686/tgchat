@@ -35,7 +35,7 @@ targets:
     info:
       path: TgChat/Info.plist
       properties:
-        CFBundleDisplayName: 计算器
+        CFBundleDisplayName: 月见便笺
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
