@@ -308,7 +308,8 @@ struct ChatView: View {
 
     private func messagesArea(_ c: TgColors) -> some View {
         ZStack {
-            LinearGradient(colors: [c.chatBgTop, c.chatBgBottom], startPoint: .top, endPoint: .bottom)
+            wallpaperColors(liveChat.wallpaper).0
+                .opacity(scheme == .dark && liveChat.wallpaper != nil ? 0.55 : 1)
                 .ignoresSafeArea()
 
             if messages.isEmpty {

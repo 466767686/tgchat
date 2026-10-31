@@ -137,8 +137,13 @@ struct Chat: Codable, Identifiable, Hashable {
     var slowMode: Int? = nil
     var historyVisible: Bool? = nil
     var topicsEnabled: Bool? = nil
+    var pinned: Bool = false
+    var archived: Bool = false
+    var folderId: String? = nil
+    var wallpaper: String? = nil
 
-    var isGroup: Bool { type != "direct" }
+    var isGroup: Bool { type == "group" }
+    var isSaved: Bool { type == "saved" }
     var isOwner: Bool { myRole == "owner" }
     var canManage: Bool { myRole == "owner" || myRole == "admin" }
 
@@ -147,12 +152,15 @@ struct Chat: Codable, Identifiable, Hashable {
     }
 
     func displayTitle(myId: String?) -> String {
+        if isSaved { return "收藏夹" }
         if isGroup { return (title?.isEmpty == false ? title! : "群聊") }
         return peer(myId: myId)?.title ?? "会话"
     }
 
     func avatarColor(myId: String?) -> String {
-        isGroup ? "#7BC862" : (peer(myId: myId)?.avatarColor ?? "#3390EC")
+        if isSaved { return "#3390EC" }
+        if isGroup { return "#7BC862" }
+        return peer(myId: myId)?.avatarColor ?? "#3390EC"
     }
 
     func preview(myId: String?) -> String {
@@ -180,6 +188,15 @@ struct UsersResponse: Codable { let users: [User] }
 struct ChatResponse: Codable { let chat: Chat; let created: Bool? }
 struct InviteResponse: Codable { let code: String; let link: String }
 struct TopicsResponse: Codable { let topics: [Topic] }
+
+struct Folder: Codable, Identifiable, Hashable {
+    let id: String
+    var name: String
+    let position: Int?
+}
+
+struct FoldersResponse: Codable { let folders: [Folder] }
+struct FolderResponse: Codable { let folder: Folder }
 struct TopicResponse: Codable { let topic: Topic }
 struct PollResponse: Codable { let poll: Poll }
 struct ReportItem: Codable, Identifiable {

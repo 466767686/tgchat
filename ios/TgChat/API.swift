@@ -208,6 +208,52 @@ final class APIClient {
         )
     }
 
+    func batchChats(_ action: String, chatIds: [String]) async throws {
+        let _: SimpleResponse = try await request(
+            "/api/chats/batch",
+            method: "POST",
+            body: ["action": action, "chatIds": chatIds]
+        )
+    }
+
+    func folders() async throws -> FoldersResponse {
+        try await request("/api/folders")
+    }
+
+    func createFolder(name: String) async throws -> FolderResponse {
+        try await request("/api/folders", method: "POST", body: ["name": name])
+    }
+
+    func deleteFolder(id: String) async throws {
+        let _: SimpleResponse = try await request("/api/folders/\(id)", method: "DELETE")
+    }
+
+    func assignFolder(chatId: String, folderId: String?) async throws {
+        let _: SimpleResponse = try await request(
+            "/api/chats/\(chatId)/folder",
+            method: "PATCH",
+            body: ["folderId": folderId ?? NSNull()]
+        )
+    }
+
+    func setWallpaper(chatId: String, wallpaper: String?) async throws {
+        let _: SimpleResponse = try await request(
+            "/api/chats/\(chatId)/wallpaper",
+            method: "POST",
+            body: ["wallpaper": wallpaper ?? NSNull()]
+        )
+    }
+
+    func savedChat() async throws -> ChatResponse {
+        try await request("/api/saved", method: "POST")
+    }
+
+    func globalSearch(query: String, kind: String = "") async throws -> MessagesResponse {
+        var path = "/api/search?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
+        if !kind.isEmpty { path += "&kind=\(kind)" }
+        return try await request(path)
+    }
+
     func searchMessages(chatId: String, query: String) async throws -> MessagesResponse {
         let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         return try await request("/api/chats/\(chatId)/search?q=\(escaped)")

@@ -40,6 +40,7 @@ final class AppState: ObservableObject {
     @Published var uploadFailed = false
     @Published var hasMore: [String: Bool] = [:]
     @Published var loadingOlder = false
+    @Published var folders: [Folder] = []
 
     @Published var usersDirectory: [User] = []
     @Published var adminUsers: [User] = []
@@ -357,6 +358,107 @@ final class AppState: ObservableObject {
             }
         } catch {
             toast = error.localizedDescription
+        }
+    }
+
+    // MARK: - Chat management
+
+    func loadFolders() async {
+        if let response = try? await api.folders() {
+            folders = response.folders
+        }
+    }
+
+    func createFolder(_ name: String) async -> Folder? {
+        do {
+            let folder = try await api.createFolder(name: name).folder
+            folders.append(folder)
+            return folder
+        } catch {
+            toast = error.localizedDescription
+            return nil
+        }
+    }
+
+    func deleteFolder(_ id: String) async {
+        try? await api.deleteFolder(id: id)
+        folders.removeAll { $0.id == id }
+        for index in chats.indices where chats[index].folderId == id {
+            chats[index].folderId = nil
+        }
+    }
+
+    func assignFolder(chatId: String, folderId: String?) async {
+        do {
+            try await api.assignFolder(chatId: chatId, folderId: folderId)
+            if let index = chats.firstIndex(where: { $0.id == chatId }) {
+                chats[index].folderId = folderId
+            }
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func batchChats(_ action: String, chatIds: [String]) async {
+        do {
+            try await api.batchChats(action, chatIds: chatIds)
+            switch action {
+            case "pin":
+                for index in chats.indices where chatIds.contains(chats[index].id) { chats[index].pinned = true }
+            case "unpin":
+                for index in chats.indices where chatIds.contains(chats[index].id) { chats[index].pinned = false }
+            case "archive":
+                for index in chats.indices where chatIds.contains(chats[index].id) { chats[index].archived = true }
+            case "unarchive":
+                for index in chats.indices where chatIds.contains(chats[index].id) { chats[index].archived = false }
+            case "read":
+                await loadChats(silent: true)
+            case "delete":
+                chats.removeAll { chatIds.contains($0.id) }
+            default:
+                break
+            }
+            sortChats()
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func setWallpaper(chatId: String, wallpaper: String?) async {
+        do {
+            try await api.setWallpaper(chatId: chatId, wallpaper: wallpaper)
+            if let index = chats.firstIndex(where: { $0.id == chatId }) {
+                chats[index].wallpaper = wallpaper
+            }
+        } catch {
+            toast = error.localizedDescription
+        }
+    }
+
+    func openSavedChat() async -> Chat? {
+        do {
+            let chat = try await api.savedChat().chat
+            await loadChats(silent: true)
+            return chat
+        } catch {
+            toast = error.localizedDescription
+            return nil
+        }
+    }
+
+    func globalSearch(_ query: String, kind: String) async -> [Message] {
+        do {
+            return try await api.globalSearch(query: query, kind: kind).messages
+        } catch {
+            toast = error.localizedDescription
+            return []
+        }
+    }
+
+    func sortChats() {
+        chats.sort { lhs, rhs in
+            if lhs.pinned != rhs.pinned { return lhs.pinned }
+            return (lhs.lastMessage?.seq ?? 0) > (rhs.lastMessage?.seq ?? 0)
         }
     }
 

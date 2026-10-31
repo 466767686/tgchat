@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS chat_members (
   role          TEXT NOT NULL DEFAULT 'member', -- owner | admin | member
   muted_until   INTEGER,
   joined_seq    INTEGER NOT NULL DEFAULT 0,
+  pinned        INTEGER NOT NULL DEFAULT 0,
+  archived      INTEGER NOT NULL DEFAULT 0,
+  folder_id     TEXT,
+  wallpaper     TEXT,
   PRIMARY KEY (chat_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_members_user ON chat_members(user_id);
@@ -107,6 +111,14 @@ CREATE TABLE IF NOT EXISTS chat_join_requests (
   user_id    TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   status     TEXT NOT NULL DEFAULT 'pending'
+);
+
+CREATE TABLE IF NOT EXISTS folders (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS topics (

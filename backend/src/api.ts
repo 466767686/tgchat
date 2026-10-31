@@ -261,7 +261,9 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
   const last = await env.DB.prepare(`${MESSAGE_SELECT} WHERE m.chat_id = ? ORDER BY m.seq DESC LIMIT 1`)
     .bind(chatId)
     .first<any>();
-  const me = await env.DB.prepare("SELECT last_read_seq, role FROM chat_members WHERE chat_id = ? AND user_id = ?")
+  const me = await env.DB.prepare(
+    "SELECT last_read_seq, role, pinned, archived, folder_id, wallpaper FROM chat_members WHERE chat_id = ? AND user_id = ?",
+  )
     .bind(chatId, viewerId)
     .first<any>();
   const unread = await env.DB.prepare(
@@ -291,6 +293,10 @@ async function loadChat(env: Env, chatId: string, viewerId: string) {
     otherReadSeq: otherRead?.n ?? 0,
     unread: unread?.n ?? 0,
     myRole: me?.role ?? "member",
+    pinned: (me?.pinned ?? 0) === 1,
+    archived: (me?.archived ?? 0) === 1,
+    folderId: me?.folder_id ?? null,
+    wallpaper: me?.wallpaper ?? null,
     lastMessage: last ? mapMessage(last) : null,
     members: members.results.map((m: any) => ({
       id: m.id,
@@ -329,7 +335,7 @@ async function createChat(
   env: Env,
   creatorId: string,
   memberIds: string[],
-  type: "direct" | "group",
+  type: "direct" | "group" | "saved",
   title: string | null,
 ): Promise<string> {
   const id = crypto.randomUUID();
@@ -502,11 +508,13 @@ export async function handleRequest(
       `SELECT c.id, c.type, c.title, c.description, c.announcement, c.photo_url, c.join_mode,
               c.slow_mode, c.history_visible, c.topics_enabled,
               c.created_at, cm.last_read_seq, cm.role AS my_role,
+              cm.pinned AS my_pinned, cm.archived AS my_archived,
+              cm.folder_id AS my_folder, cm.wallpaper AS my_wallpaper,
               (SELECT MAX(cm2.last_read_seq) FROM chat_members cm2 WHERE cm2.chat_id = c.id AND cm2.user_id != ?) AS other_read_seq,
               (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.seq > cm.last_read_seq AND m.sender_id != ?) AS unread
        FROM chats c JOIN chat_members cm ON cm.chat_id = c.id
        WHERE cm.user_id = ?
-       ORDER BY COALESCE((SELECT MAX(seq) FROM messages m WHERE m.chat_id = c.id), 0) DESC, c.created_at DESC`,
+       ORDER BY cm.pinned DESC, COALESCE((SELECT MAX(seq) FROM messages m WHERE m.chat_id = c.id), 0) DESC, c.created_at DESC`,
     )
       .bind(me.id, me.id, me.id)
       .all<any>();
@@ -564,6 +572,10 @@ export async function handleRequest(
       topicsEnabled: (c.topics_enabled ?? 0) === 1,
       createdAt: c.created_at,
       myRole: c.my_role ?? "member",
+      pinned: (c.my_pinned ?? 0) === 1,
+      archived: (c.my_archived ?? 0) === 1,
+      folderId: c.my_folder ?? null,
+      wallpaper: c.my_wallpaper ?? null,
       lastReadSeq: c.last_read_seq,
       otherReadSeq: c.other_read_seq ?? 0,
       unread: c.unread,
@@ -572,6 +584,152 @@ export async function handleRequest(
     }));
 
     return json({ chats });
+  }
+
+  if (method === "POST" && path === "/api/chats/batch") {
+    const me = await authenticate(request, env);
+    const body = await readBody(request);
+    const action = typeof body.action === "string" ? body.action : "";
+    const chatIds = Array.isArray(body.chatIds) ? body.chatIds.filter((id: unknown) => typeof id === "string") : [];
+    if (!chatIds.length) throw new ApiError(400, "缺少 chatIds", "invalid_input");
+    const placeholders = chatIds.map(() => "?").join(",");
+
+    if (action === "pin" || action === "unpin") {
+      await env.DB.prepare(
+        `UPDATE chat_members SET pinned = ? WHERE user_id = ? AND chat_id IN (${placeholders})`,
+      )
+        .bind(action === "pin" ? 1 : 0, me.id, ...chatIds)
+        .run();
+    } else if (action === "archive" || action === "unarchive") {
+      await env.DB.prepare(
+        `UPDATE chat_members SET archived = ? WHERE user_id = ? AND chat_id IN (${placeholders})`,
+      )
+        .bind(action === "archive" ? 1 : 0, me.id, ...chatIds)
+        .run();
+    } else if (action === "read") {
+      for (const chatId of chatIds) {
+        const max = await env.DB.prepare("SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE chat_id = ?")
+          .bind(chatId)
+          .first<any>();
+        await env.DB.prepare("UPDATE chat_members SET last_read_seq = ? WHERE user_id = ? AND chat_id = ?")
+          .bind(max?.s ?? 0, me.id, chatId)
+          .run();
+      }
+    } else if (action === "delete") {
+      await env.DB.prepare(
+        `DELETE FROM chat_members WHERE user_id = ? AND chat_id IN (${placeholders})`,
+      )
+        .bind(me.id, ...chatIds)
+        .run();
+      await env.DB.prepare(
+        `DELETE FROM chats WHERE id IN (${placeholders}) AND id NOT IN (SELECT chat_id FROM chat_members)`,
+      )
+        .bind(...chatIds)
+        .run();
+    } else {
+      throw new ApiError(400, "未知操作", "invalid_input");
+    }
+    return json({ ok: true, action, count: chatIds.length });
+  }
+
+  if (method === "POST" && path === "/api/saved") {
+    const me = await authenticate(request, env);
+    const existing = await env.DB.prepare(
+      `SELECT c.id FROM chats c JOIN chat_members cm ON cm.chat_id = c.id
+       WHERE c.type = 'saved' AND cm.user_id = ? LIMIT 1`,
+    )
+      .bind(me.id)
+      .first<any>();
+    if (existing) return json({ chat: await loadChat(env, existing.id, me.id) });
+    const id = await createChat(env, me.id, [], "saved", "收藏夹");
+    return json({ chat: await loadChat(env, id, me.id) }, 201);
+  }
+
+  if (method === "GET" && path === "/api/search") {
+    const me = await authenticate(request, env);
+    const params = new URL(request.url).searchParams;
+    const query = (params.get("q") ?? "").trim();
+    const kind = params.get("kind") ?? "";
+    const chatFilter = params.get("chatId") ?? "";
+    if (!query && !chatFilter) return json({ messages: [] });
+
+    const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    const conditions: string[] = ["m.deleted_at IS NULL", "cm.user_id = ?"];
+    const bindings: unknown[] = [me.id];
+    if (query) {
+      conditions.push("m.text LIKE ? ESCAPE '\\'");
+      bindings.push(`%${escaped}%`);
+    }
+    if (chatFilter) {
+      conditions.push("m.chat_id = ?");
+      bindings.push(chatFilter);
+    }
+    if (kind === "media") {
+      conditions.push("m.media_id IS NOT NULL");
+    } else if (kind === "text") {
+      conditions.push("m.media_id IS NULL");
+    } else if (kind === "links") {
+      conditions.push("m.text LIKE '%http%'");
+    }
+
+    const rows = await env.DB.prepare(
+      `${MESSAGE_SELECT} JOIN chat_members cm ON cm.chat_id = m.chat_id
+       WHERE ${conditions.join(" AND ")} ORDER BY m.seq DESC LIMIT 60`,
+    )
+      .bind(...bindings)
+      .all<any>();
+    const mapped = rows.results.map(mapMessage);
+    await decorate(env, rows.results, mapped, me.id);
+    return json({ messages: mapped });
+  }
+
+  if (seg.length === 2 && seg[0] === "api" && seg[1] === "folders") {
+    const me = await authenticate(request, env);
+    if (method === "GET") {
+      const rows = await env.DB.prepare("SELECT * FROM folders WHERE user_id = ? ORDER BY position, created_at")
+        .bind(me.id)
+        .all<any>();
+      return json({
+        folders: rows.results.map((f: any) => ({ id: f.id, name: f.name, position: f.position })),
+      });
+    }
+    if (method === "POST") {
+      const body = await readBody(request);
+      const name = text(body.name, "文件夹名称", 1, 32);
+      const id = crypto.randomUUID();
+      await env.DB.prepare("INSERT INTO folders (id, user_id, name, position, created_at) VALUES (?, ?, ?, ?, ?)")
+        .bind(id, me.id, name, Date.now(), Date.now())
+        .run();
+      return json({ folder: { id, name, position: 0 } }, 201);
+    }
+  }
+
+  if (seg.length === 3 && seg[0] === "api" && seg[1] === "folders" && (method === "PATCH" || method === "DELETE")) {
+    const me = await authenticate(request, env);
+    const folderId = seg[2];
+    if (method === "DELETE") {
+      await env.DB.prepare("DELETE FROM folders WHERE id = ? AND user_id = ?").bind(folderId, me.id).run();
+      await env.DB.prepare("UPDATE chat_members SET folder_id = NULL WHERE user_id = ? AND folder_id = ?")
+        .bind(me.id, folderId)
+        .run();
+      return ok({ ok: true });
+    }
+    const body = await readBody(request);
+    const name = text(body.name, "文件夹名称", 1, 32);
+    await env.DB.prepare("UPDATE folders SET name = ? WHERE id = ? AND user_id = ?")
+      .bind(name, folderId, me.id)
+      .run();
+    return ok({ ok: true });
+  }
+
+  if (method === "PATCH" && seg.length === 4 && seg[0] === "api" && seg[1] === "chats" && seg[3] === "folder") {
+    const me = await authenticate(request, env);
+    const body = await readBody(request);
+    const folderId = typeof body.folderId === "string" && body.folderId ? body.folderId : null;
+    await env.DB.prepare("UPDATE chat_members SET folder_id = ? WHERE chat_id = ? AND user_id = ?")
+      .bind(folderId, seg[2], me.id)
+      .run();
+    return ok({ ok: true });
   }
 
   if (method === "POST" && path === "/api/chats") {
@@ -828,6 +986,17 @@ export async function handleRequest(
           .run();
       }
       return json({ chat: await loadChat(env, chatId, me.id) });
+    }
+
+    if (method === "POST" && seg.length === 4 && seg[3] === "wallpaper") {
+      const me = await authenticate(request, env);
+      await assertMember(env, chatId, me.id);
+      const body = await readBody(request);
+      const wallpaper = typeof body.wallpaper === "string" ? body.wallpaper.slice(0, 64) : null;
+      await env.DB.prepare("UPDATE chat_members SET wallpaper = ? WHERE chat_id = ? AND user_id = ?")
+        .bind(wallpaper, chatId, me.id)
+        .run();
+      return json({ wallpaper });
     }
 
     if (method === "POST" && seg.length === 4 && seg[3] === "media") {
