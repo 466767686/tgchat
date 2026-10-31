@@ -17,6 +17,9 @@ packages:
   SDWebImageWebPCoder:
     url: https://github.com/SDWebImage/SDWebImageWebPCoder
     from: 0.15.0
+  Lottie:
+    url: https://github.com/airbnb/lottie-ios
+    from: 4.5.0
 
 targets:
   TgChat:
@@ -28,6 +31,7 @@ targets:
     dependencies:
       - package: WebRTC
       - package: SDWebImageWebPCoder
+      - package: Lottie
     info:
       path: TgChat/Info.plist
       properties:

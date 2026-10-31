@@ -1,3 +1,4 @@
+import UIKit
 import SwiftUI
 
 struct AvatarView: View {
@@ -82,6 +83,24 @@ struct MessageBubbleView: View {
     let colors: TgColors
     var showViews: Bool = false
 
+    /// Measured so the bubble hugs short text instead of being stretched by
+    /// flexible SwiftUI layout (the footer's Spacer used to claim full width).
+    private var textWidth: CGFloat {
+        let plain = message.text.isEmpty ? " " : message.text
+        let font = UIFont.systemFont(ofSize: 16)
+        let rect = (plain as NSString).boundingRect(
+            with: CGSize(width: 264, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        var width = ceil(rect.width)
+        if message.replyTo != nil { width = max(width, 190) }
+        if message.forwardedFrom != nil { width = max(width, 150) }
+        let minimum: CGFloat = message.replyTo == nil ? 92 : 190
+        return max(minimum, min(264, width))
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             if isOut { Spacer(minLength: 44) }
@@ -124,11 +143,13 @@ struct MessageBubbleView: View {
                         .font(.system(size: 15))
                         .italic()
                         .foregroundColor(colors.textTertiary)
+                        .frame(width: textWidth, alignment: .leading)
                 } else {
                     Text(formattedText(message.text))
                         .font(.system(size: 16))
                         .foregroundColor(isOut ? colors.bubbleOutText : colors.bubbleInText)
                         .tint(colors.accent)
+                        .frame(width: textWidth, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 

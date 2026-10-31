@@ -909,7 +909,32 @@ export async function handleRequest(
     const bin = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`);
     if (!bin.ok) throw new ApiError(502, "贴纸下载失败", "telegram_error");
 
-    return new Response(bin.body, {
+    const buffer = await bin.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+
+    // .tgs is gzip-compressed Lottie JSON — decompress at the edge so the
+    // client only ever deals with plain JSON.
+    if (bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      try {
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+        const json = await new Response(stream).arrayBuffer();
+        return new Response(json, {
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "private, max-age=86400",
+          },
+        });
+      } catch {
+        return new Response(bytes, {
+          headers: {
+            "content-type": "application/octet-stream",
+            "cache-control": "private, max-age=86400",
+          },
+        });
+      }
+    }
+
+    return new Response(bytes, {
       headers: {
         "content-type": bin.headers.get("content-type") ?? "application/octet-stream",
         "cache-control": "private, max-age=86400",

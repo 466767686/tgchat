@@ -101,7 +101,7 @@ struct MediaMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             switch media.kind {
-            case "image", "sticker":
+            case "image":
                 Button {
                     onOpenImage(media)
                 } label: {
@@ -111,6 +111,15 @@ struct MediaMessageView: View {
                         .cornerRadius(12)
                 }
                 .buttonStyle(.plain)
+            case "sticker":
+                if media.mime.contains("tgsticker") || (media.name ?? "").hasSuffix(".json") {
+                    RemoteLottieStickerView(url: mediaURL, token: token)
+                        .frame(width: imageSize.width, height: imageSize.height)
+                } else {
+                    RemoteImageView(url: mediaURL, token: token)
+                        .frame(width: imageSize.width, height: imageSize.height)
+                        .scaledToFit()
+                }
             case "gif":
                 Button {
                     onOpenImage(media)

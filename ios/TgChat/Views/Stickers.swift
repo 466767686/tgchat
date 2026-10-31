@@ -1,3 +1,4 @@
+import Lottie
 import SDWebImage
 import SDWebImageWebPCoder
 import SwiftUI
@@ -62,26 +63,34 @@ final class StickerLibrary: ObservableObject {
     ) async throws -> (pack: ImportedStickerPack, skipped: Int) {
         let resolved = try await APIClient.shared.resolveStickerSet(token: token, name: link)
         let staticStickers = resolved.stickers.filter { !$0.animated && !$0.video }
-        guard !staticStickers.isEmpty else {
+        let animatedStickers = resolved.stickers.filter { $0.animated && !$0.video }
+        guard !staticStickers.isEmpty || !animatedStickers.isEmpty else {
             throw StickerImportError.noStaticStickers
         }
 
-        let limited = Array(staticStickers.prefix(60))
+        let limited = Array((staticStickers + animatedStickers).prefix(80))
         let packId = "\(resolved.name)-\(UUID().uuidString.prefix(6))"
         let dir = root.appendingPathComponent(packId)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
         var files: [String] = []
         for (index, sticker) in limited.enumerated() {
+            defer { progress(Double(index + 1) / Double(limited.count)) }
             let data = try await APIClient.shared.stickerFile(token: token, fileId: sticker.fileId)
-            guard let image = SDImageWebPCoder.shared.decodedImage(with: data, options: nil),
-                  let png = image.pngData() else {
-                continue
+
+            if sticker.animated {
+                // Worker decompresses .tgs into Lottie JSON.
+                guard let first = data.first, first == 0x7b /* { */ else { continue }
+                let name = String(format: "%03d.json", index)
+                try data.write(to: dir.appendingPathComponent(name))
+                files.append(name)
+            } else {
+                guard let image = SDImageWebPCoder.shared.decodedImage(with: data, options: nil),
+                      let png = image.pngData() else { continue }
+                let name = String(format: "%03d.png", index)
+                try png.write(to: dir.appendingPathComponent(name))
+                files.append(name)
             }
-            let name = String(format: "%03d.png", index)
-            try png.write(to: dir.appendingPathComponent(name))
-            files.append(name)
-            progress(Double(index + 1) / Double(limited.count))
         }
 
         guard !files.isEmpty else {
@@ -91,7 +100,7 @@ final class StickerLibrary: ObservableObject {
         let pack = ImportedStickerPack(id: packId, title: resolved.title, files: files)
         packs.append(pack)
         persist()
-        return (pack, resolved.stickers.count - staticStickers.count)
+        return (pack, resolved.stickers.count - staticStickers.count - animatedStickers.count)
     }
 }
 
@@ -101,7 +110,7 @@ enum StickerImportError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noStaticStickers: return "这个贴纸包只有动态贴纸（.tgs/.webm），当前版本只支持静态贴纸"
+        case .noStaticStickers: return "这个贴纸包里没有可导入的贴纸（视频贴纸 .webm 暂不支持）"
         case .decodeFailed: return "贴纸解码失败"
         }
     }
@@ -324,7 +333,7 @@ struct StickerPanel: View {
                             Button {
                                 sendSticker(pack: pack, index: index)
                             } label: {
-                                LocalStickerImage(
+                                StickerThumb(
                                     url: library.fileURL(pack: pack, index: index),
                                     size: 72
                                 )
@@ -340,7 +349,7 @@ struct StickerPanel: View {
                             Button {
                                 withAnimation(.easeOut(duration: 0.15)) { selectedPack = item.id }
                             } label: {
-                                LocalStickerImage(
+                                StickerThumb(
                                     url: item.files.isEmpty ? nil : library.fileURL(pack: item, index: 0),
                                     size: 30
                                 )
@@ -372,12 +381,13 @@ struct StickerPanel: View {
 
     private func sendSticker(pack: ImportedStickerPack, index: Int) {
         let url = library.fileURL(pack: pack, index: index)
+        let isLottie = url.pathExtension.lowercased() == "json"
         app.sendMedia(
             chatId: chatId,
             fileURL: url,
             kind: "sticker",
-            mime: "image/png",
-            name: "sticker.png",
+            mime: isLottie ? "application/x-tgsticker" : "image/png",
+            name: isLottie ? "sticker.json" : "sticker.png",
             caption: "",
             width: 512,
             height: 512
@@ -385,21 +395,74 @@ struct StickerPanel: View {
     }
 }
 
-struct LocalStickerImage: View {
+struct StickerThumb: View {
     let url: URL?
     let size: CGFloat
 
     var body: some View {
         Group {
-            if let url = url, let image = UIImage(contentsOfFile: url.path) {
+            if let url = url, url.pathExtension.lowercased() == "json" {
+                LottieStickerView(path: url.path)
+                    .frame(width: size, height: size)
+            } else if let url = url, let image = UIImage(contentsOfFile: url.path) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
+                    .frame(width: size, height: size)
+            } else {
+                Color.clear.frame(width: size, height: size)
+            }
+        }
+    }
+}
+
+struct LottieStickerView: View {
+    let path: String
+
+    var body: some View {
+        if let animation = LottieAnimation.filepath(path) {
+            LottieView(animation: animation)
+                .playing(loopMode: .loop)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Color.clear
+        }
+    }
+}
+
+struct RemoteLottieStickerView: View {
+    let url: URL?
+    let token: String?
+
+    @State private var path: String?
+
+    var body: some View {
+        Group {
+            if let path = path {
+                LottieStickerView(path: path)
             } else {
                 Color.clear
             }
         }
-        .frame(width: size, height: size)
+        .task(id: url?.absoluteString) {
+            await load()
+        }
+    }
+
+    private func load() async {
+        guard let url = url else { return }
+        var request = URLRequest(url: url)
+        if let token = token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return }
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sticker-\(UUID().uuidString).json")
+        try? data.write(to: tmp)
+        await MainActor.run {
+            path = tmp.path
+        }
     }
 }
 
