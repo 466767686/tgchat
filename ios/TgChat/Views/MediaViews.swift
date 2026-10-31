@@ -101,11 +101,21 @@ struct MediaMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             switch media.kind {
-            case "image", "sticker", "gif":
+            case "image", "sticker":
                 Button {
                     onOpenImage(media)
                 } label: {
                     RemoteImageView(url: mediaURL, token: token)
+                        .frame(width: imageSize.width, height: imageSize.height)
+                        .clipped()
+                        .cornerRadius(12)
+                }
+                .buttonStyle(.plain)
+            case "gif":
+                Button {
+                    onOpenImage(media)
+                } label: {
+                    AnimatedImageView(url: mediaURL, token: token)
                         .frame(width: imageSize.width, height: imageSize.height)
                         .clipped()
                         .cornerRadius(12)
