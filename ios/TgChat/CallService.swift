@@ -186,8 +186,8 @@ final class CallService: NSObject, ObservableObject {
             guard let candidate = payload["candidate"] as? String else { return }
             let ice = RTCIceCandidate(
                 sdp: candidate,
-                sdpMid: payload["sdpMid"] as? String,
-                sdpMLineIndex: Int32(payload["sdpMLineIndex"] as? Int ?? 0)
+                sdpMLineIndex: Int32(payload["sdpMLineIndex"] as? Int ?? 0),
+                sdpMid: payload["sdpMid"] as? String
             )
             if let pc = peerConnection, pc.remoteDescription != nil {
                 pc.add(ice)
