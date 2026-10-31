@@ -59,6 +59,21 @@
 | 自定义壁纸（8 套，按聊天） | ✅ |
 | 端到端加密架构 | 📄 设计文档 `docs/E2EE.md`，未接入客户端 |
 
+### 动效系统（Motion Design）
+
+| 能力 | 实现 |
+| --- | --- |
+| 统一动效 token | `Motion.quick/standard/gentle/bouncy/fade/layout`，全 App 不再写裸动画曲线 |
+| Reduce Motion | 位移→淡化、共享元素→颜色过渡、滚动→无动画、缩放→关闭、抖动→关闭 |
+| 按压缩放微交互 | `MotionPressStyle` / `MotionIconPressStyle` + 触感 |
+| 共享元素 | 会话文件夹胶囊、贴纸 Tab 使用 matchedGeometryEffect |
+| 消息插入动效 | 上浮 + 淡入（Reduce Motion 下纯淡入），可被后续消息打断 |
+| 手势驱动 | 图片查看器下拉关闭（拖动进度驱动背景透明度与缩放） |
+| 空间关系 | 面板/回复条从底部滑入，与输入框保持连续 |
+| 主线程保护 | 文本格式化、气泡宽度、日期格式化、图片解码全部缓存/异步 |
+
+细节见 `docs/MOTION.md`。
+
 ### 稳定性修复
 
 | 问题 | 修复 |
@@ -240,6 +255,21 @@
 | 深色主题（跟随系统/浅色/深色） | ✅ |
 | 自定义壁纸（8 套，按聊天） | ✅ |
 | 端到端加密架构 | 📄 设计文档 `docs/E2EE.md`，未接入客户端 |
+
+### 动效系统（Motion Design）
+
+| 能力 | 实现 |
+| --- | --- |
+| 统一动效 token | `Motion.quick/standard/gentle/bouncy/fade/layout`，全 App 不再写裸动画曲线 |
+| Reduce Motion | 位移→淡化、共享元素→颜色过渡、滚动→无动画、缩放→关闭、抖动→关闭 |
+| 按压缩放微交互 | `MotionPressStyle` / `MotionIconPressStyle` + 触感 |
+| 共享元素 | 会话文件夹胶囊、贴纸 Tab 使用 matchedGeometryEffect |
+| 消息插入动效 | 上浮 + 淡入（Reduce Motion 下纯淡入），可被后续消息打断 |
+| 手势驱动 | 图片查看器下拉关闭（拖动进度驱动背景透明度与缩放） |
+| 空间关系 | 面板/回复条从底部滑入，与输入框保持连续 |
+| 主线程保护 | 文本格式化、气泡宽度、日期格式化、图片解码全部缓存/异步 |
+
+细节见 `docs/MOTION.md`。
 
 ### 稳定性修复
 
