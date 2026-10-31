@@ -1,4 +1,5 @@
 import AVFoundation
+import Speech
 import SwiftUI
 
 // MARK: - Recorder
@@ -102,6 +103,9 @@ struct VoiceMessageView: View {
     @State private var player: AVAudioPlayer?
     @State private var progress: Double = 0
     @State private var timer: Timer?
+    @State private var rate: Float = 1.0
+    @State private var transcription: String?
+    @State private var transcribing = false
 
     private var bars: [CGFloat] {
         var seed = UInt64(bitPattern: Int64(message.id.hashValue))
@@ -145,9 +149,48 @@ struct VoiceMessageView: View {
                 }
                 .frame(height: 22)
 
-                Text(durationText)
-                    .font(.system(size: 11))
-                    .foregroundColor(colors.textTertiary)
+                HStack(spacing: 8) {
+                    Text(durationText)
+                        .font(.system(size: 11))
+                        .foregroundColor(colors.textTertiary)
+
+                    Button {
+                        rate = rate >= 2.0 ? 1.0 : (rate >= 1.5 ? 2.0 : 1.5)
+                        if playing {
+                            player?.enableRate = true
+                            player?.rate = rate
+                        }
+                    } label: {
+                        Text(String(format: "%.1fx", rate))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(colors.accent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(colors.accent.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        toggleTranscription()
+                    } label: {
+                        if transcribing {
+                            ProgressView().scaleEffect(0.5).frame(width: 18, height: 14)
+                        } else {
+                            Image(systemName: transcription == nil ? "text.bubble" : "text.bubble.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(colors.accent)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let transcription = transcription, !transcription.isEmpty {
+                    Text(transcription)
+                        .font(.system(size: 12))
+                        .foregroundColor(colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 210, alignment: .leading)
+                }
             }
         }
         .padding(.vertical, 2)
@@ -178,21 +221,58 @@ struct VoiceMessageView: View {
             play(localURL)
             return
         }
-        guard let url = APIClient.shared.mediaURL(media.url) else { return }
-        downloading = true
+        Task {
+            if let file = await ensureLocal() {
+                await MainActor.run { play(file) }
+            }
+        }
+    }
+
+    private func ensureLocal() async -> URL? {
+        if let localURL = localURL { return localURL }
+        guard let url = APIClient.shared.mediaURL(media.url) else { return nil }
+        await MainActor.run { downloading = true }
+        defer { Task { @MainActor in downloading = false } }
         var request = URLRequest(url: url)
         if let token = token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        Task {
-            defer { downloading = false }
-            guard let (data, _) = try? await URLSession.shared.data(for: request) else { return }
-            let file = FileManager.default.temporaryDirectory
-                .appendingPathComponent("\(media.id).m4a")
-            try? data.write(to: file)
-            await MainActor.run {
-                localURL = file
-                play(file)
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(media.id).m4a")
+        try? data.write(to: file)
+        await MainActor.run { localURL = file }
+        return file
+    }
+
+    private func toggleTranscription() {
+        if transcription != nil {
+            transcription = nil
+            return
+        }
+        SFSpeechRecognizer.requestAuthorization { status in
+            guard status == .authorized else {
+                DispatchQueue.main.async {
+                    transcription = "未授权语音识别"
+                }
+                return
+            }
+            Task {
+                guard let file = await ensureLocal() else { return }
+                await MainActor.run { transcribing = true }
+                let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN")) ?? SFSpeechRecognizer()
+                let request = SFSpeechURLRecognitionRequest(url: file)
+                request.shouldReportPartialResults = false
+                recognizer?.recognitionTask(with: request) { result, error in
+                    DispatchQueue.main.async {
+                        if let result = result, result.isFinal {
+                            transcription = result.bestTranscription.formattedString
+                            transcribing = false
+                        } else if error != nil {
+                            transcription = "转写失败"
+                            transcribing = false
+                        }
+                    }
+                }
             }
         }
     }
@@ -201,6 +281,8 @@ struct VoiceMessageView: View {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
         guard let audio = try? AVAudioPlayer(contentsOf: url) else { return }
+        audio.enableRate = true
+        audio.rate = rate
         audio.prepareToPlay()
         audio.play()
         player = audio

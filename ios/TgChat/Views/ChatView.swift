@@ -26,6 +26,7 @@ struct ChatView: View {
     @State private var showTopicCreate = false
     @State private var newTopicTitle = ""
     @State private var reportTarget: Message?
+    @State private var showCall = false
 
     private var allMessages: [Message] { app.messages[chat.id] ?? [] }
     private var messages: [Message] {
@@ -165,6 +166,16 @@ struct ChatView: View {
         .onDisappear {
             app.closeChat()
         }
+        .onReceive(CallService.shared.$state) { state in
+            if state.isBusy { showCall = true }
+        }
+        .sheet(isPresented: $showCall, onDismiss: {
+            if !CallService.shared.state.isBusy {
+                CallService.shared.reset()
+            }
+        }) {
+            CallView()
+        }
     }
 
     // MARK: - Header
@@ -204,6 +215,21 @@ struct ChatView: View {
             .buttonStyle(.plain)
 
             Spacer()
+
+            if !liveChat.isGroup && !liveChat.isSaved {
+                Button {
+                    CallService.shared.startCall(
+                        chatId: chat.id,
+                        peerName: liveChat.displayTitle(myId: myId)
+                    )
+                    showCall = true
+                } label: {
+                    Image(systemName: "phone.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(c.accent)
+                        .frame(width: 32, height: 32)
+                }
+            }
 
             Button {
                 showSearch = true

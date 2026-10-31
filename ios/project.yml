@@ -10,6 +10,11 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    from: 156.0.0
+
 targets:
   TgChat:
     type: application
@@ -17,6 +22,8 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: TgChat
+    dependencies:
+      - package: WebRTC
     info:
       path: TgChat/Info.plist
       properties:
@@ -30,7 +37,9 @@ targets:
           NSAllowsArbitraryLoads: true
         UIBackgroundModes:
           - audio
-        NSMicrophoneUsageDescription: 发送语音消息需要使用麦克风
+        NSMicrophoneUsageDescription: 发送语音消息和通话需要使用麦克风
+        NSCameraUsageDescription: 拍摄视频消息需要使用相机
+        NSSpeechRecognitionUsageDescription: 语音转文字需要使用语音识别
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tgchat.app

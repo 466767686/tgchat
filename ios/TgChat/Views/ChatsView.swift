@@ -13,6 +13,7 @@ struct ChatsView: View {
     @State private var wallpaperTarget: Chat?
     @State private var newFolderName = ""
     @State private var showCreateFolder = false
+    @State private var showCall = false
 
     private var archivedChats: [Chat] { app.chats.filter { $0.archived } }
     private var activeChats: [Chat] {
@@ -111,6 +112,16 @@ struct ChatsView: View {
                 }
             }
             Button("取消", role: .cancel) {}
+        }
+        .onReceive(CallService.shared.$state) { state in
+            if state.isBusy { showCall = true }
+        }
+        .sheet(isPresented: $showCall, onDismiss: {
+            if !CallService.shared.state.isBusy {
+                CallService.shared.reset()
+            }
+        }) {
+            CallView()
         }
         .task {
             await app.loadFolders()

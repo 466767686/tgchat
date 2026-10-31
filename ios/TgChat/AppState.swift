@@ -794,6 +794,10 @@ final class AppState: ObservableObject {
                 self.messages[chatId] = list
             }
         }
+        CallService.shared.realtime = realtime
+        realtime.onSignal = { payload in
+            CallService.shared.handleSignal(payload)
+        }
         realtime.onPoll = { [weak self] seq, poll in
             Task { @MainActor in
                 guard let self = self, var list = self.messages[chatId],

@@ -99,6 +99,9 @@ export class ChatHub {
         }
         break;
       default:
+        if (typeof data.type === "string" && data.type.startsWith("call.")) {
+          this.broadcast({ ...(data as Record<string, unknown>), from: att.userId, fromName: att.name }, att.userId);
+        }
         break;
     }
   }

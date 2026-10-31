@@ -12,6 +12,7 @@ final class RealtimeClient {
     var onReaction: ((Int64, [Reaction]) -> Void)?
     var onPin: ((Int64, Bool) -> Void)?
     var onPoll: ((Int64, Poll) -> Void)?
+    var onSignal: (([String: Any]) -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private let session = URLSession(configuration: .default)
@@ -80,6 +81,13 @@ final class RealtimeClient {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String else { return }
 
+        if type.hasPrefix("call.") {
+            DispatchQueue.main.async {
+                self.onSignal?(object)
+            }
+            return
+        }
+
         switch type {
         case "message":
             if let payload = object["message"],
@@ -119,6 +127,12 @@ final class RealtimeClient {
         default:
             break
         }
+    }
+
+    func sendRaw(_ payload: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: data, encoding: .utf8) else { return }
+        task?.send(.string(text)) { _ in }
     }
 
     func sendTyping() {
