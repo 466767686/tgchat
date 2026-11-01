@@ -30,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -49,7 +50,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.tgchat.app.ui.screens.AdminScreen
-import com.tgchat.app.ui.screens.CalculatorScreen
+import com.tgchat.app.ui.LocalReduceMotion
+import com.tgchat.app.ui.rememberReduceMotion
+import com.tgchat.app.ui.screens.NoteDisguiseScreen
 import com.tgchat.app.ui.screens.ChatScreen
 import com.tgchat.app.ui.screens.ChatsScreen
 import com.tgchat.app.ui.screens.LoginScreen
@@ -78,13 +81,14 @@ fun TelegramApp(vm: AppViewModel) {
     }
 
     TgTheme(darkTheme = dark) {
+        val reduceMotion = rememberReduceMotion()
         val view = LocalView.current
         val context = LocalContext.current
         val lockedNow = vm.disguiseEnabled && vm.locked
         SideEffect {
             if (!view.isInEditMode) {
                 context.findActivity()?.let { activity ->
-                    val light = !dark && !lockedNow
+                    val light = if (lockedNow) true else !dark
                     WindowCompat.getInsetsController(activity.window, view).isAppearanceLightStatusBars = light
                     WindowCompat.getInsetsController(activity.window, view).isAppearanceLightNavigationBars = light
                 }
@@ -117,15 +121,20 @@ fun TelegramApp(vm: AppViewModel) {
             }
         }
 
+        CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
         Surface(modifier = Modifier.fillMaxSize(), color = LocalTgColors.current.background) {
             Box(modifier = Modifier.fillMaxSize()) {
                 if (vm.disguiseEnabled && vm.locked) {
-                    CalculatorScreen(vm)
+                    NoteDisguiseScreen(vm)
                 } else AnimatedContent(
                     targetState = vm.route,
                     transitionSpec = {
-                        (fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 14 }) togetherWith
-                            (fadeOut(tween(140)) + slideOutHorizontally(tween(200)) { -it / 20 })
+                        if (reduceMotion) {
+                            fadeIn(tween(120)) togetherWith fadeOut(tween(120))
+                        } else {
+                            (fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 14 }) togetherWith
+                                (fadeOut(tween(140)) + slideOutHorizontally(tween(200)) { -it / 20 })
+                        }
                     },
                     label = "screen",
                 ) { route ->
@@ -167,6 +176,7 @@ fun TelegramApp(vm: AppViewModel) {
         }
 
         BackHandler(enabled = vm.backStack.size > 1) { vm.back() }
+        }
     }
 }
 

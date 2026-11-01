@@ -127,7 +127,7 @@ fun SettingsScreen(vm: AppViewModel) {
 
         SettingsRow(
             icon = Icons.Rounded.VisibilityOff,
-            title = "计算器伪装",
+            title = "便笺伪装",
             value = if (vm.disguiseEnabled) "已开启" else "已关闭",
             onClick = { vm.setDisguise(!vm.disguiseEnabled) },
         )
@@ -176,7 +176,7 @@ fun SettingsScreen(vm: AppViewModel) {
             text = {
                 Column {
                     Text(
-                        "4-8 位数字。在计算器上输入该密码后按 = 进入聊天。",
+                        "4-8 位数字。在便笺右上角连点月亮 5 次，或在搜索框输入密码进入。",
                         color = c.textSecondary,
                         fontSize = 13.sp,
                     )

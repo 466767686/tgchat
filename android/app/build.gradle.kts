@@ -11,11 +11,11 @@ android {
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
-        applicationId = "com.tgchat.app"
+        applicationId = "com.yuejian.note"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "2.0.0"
 
         val baseUrl = (project.findProperty("tgchat.baseUrl") as String?)
             ?: "https://tgchat-api.example.workers.dev"

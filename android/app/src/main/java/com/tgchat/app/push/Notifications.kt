@@ -29,8 +29,8 @@ object Notifications {
             },
         )
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_SERVICE, "后台运行", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "保持后台运行"
+            NotificationChannel(CHANNEL_SERVICE, "便笺同步", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "同步便笺内容"
                 setShowBadge(false)
             },
         )
@@ -39,8 +39,8 @@ object Notifications {
     fun serviceNotification(context: Context): Notification =
         NotificationCompat.Builder(context, CHANNEL_SERVICE)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("计算器")
-            .setContentText("保持后台运行")
+            .setContentTitle("月见便笺")
+            .setContentText("正在同步便笺")
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)

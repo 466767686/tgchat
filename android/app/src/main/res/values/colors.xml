@@ -2,5 +2,5 @@
 <resources>
     <color name="window_bg">#000000</color>
     <color name="brand_blue">#3390EC</color>
-    <color name="ic_launcher_background">#1C1C1E</color>
+    <color name="ic_launcher_background">#FFE6F1</color>
 </resources>
