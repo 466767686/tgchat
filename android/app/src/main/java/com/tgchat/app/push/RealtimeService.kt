@@ -136,7 +136,10 @@ class RealtimeService : Service() {
             json.decodeFromJsonElement(MessageDto.serializer(), payload)
         }.getOrNull() ?: return
 
-        if (AppVisibility.visible) return
+        if (AppVisibility.visible) {
+            IncomingCenter.publish(message)
+            return
+        }
         Notifications.showMessage(this, message)
     }
 

@@ -19,10 +19,13 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -47,6 +51,7 @@ import com.tgchat.app.ui.components.ServerUrlDialog
 import com.tgchat.app.ui.components.SectionDivider
 import com.tgchat.app.ui.components.TgTextField
 import com.tgchat.app.ui.theme.LocalTgColors
+import com.tgchat.app.push.AppSettings
 import com.tgchat.app.ui.theme.TelegramBlue
 
 @Composable
@@ -57,6 +62,9 @@ fun SettingsScreen(vm: AppViewModel) {
     var pinDraft by remember { mutableStateOf("") }
     var showServer by remember { mutableStateOf(false) }
     var showLogout by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var popupEnabled by remember { mutableStateOf(AppSettings.popupEnabled(context)) }
+    var soundEnabled by remember { mutableStateOf(AppSettings.soundEnabled(context)) }
 
     val me = vm.me
 
@@ -121,6 +129,28 @@ fun SettingsScreen(vm: AppViewModel) {
                 onClick = { vm.openAdmin() },
             )
         }
+
+        Spacer(Modifier.height(10.dp))
+        SectionDivider()
+
+        SettingsSwitchRow(
+            icon = Icons.Rounded.Notifications,
+            title = "消息弹窗",
+            checked = popupEnabled,
+            onCheckedChange = {
+                popupEnabled = it
+                AppSettings.setPopupEnabled(context, it)
+            },
+        )
+        SettingsSwitchRow(
+            icon = Icons.Rounded.VolumeUp,
+            title = "消息提示音",
+            checked = soundEnabled,
+            onCheckedChange = {
+                soundEnabled = it
+                AppSettings.setSoundEnabled(context, it)
+            },
+        )
 
         Spacer(Modifier.height(10.dp))
         SectionDivider()
@@ -302,4 +332,30 @@ private fun ThemeDialog(
             TextButton(onClick = onDismiss) { Text("完成", color = TelegramBlue) }
         },
     )
+}
+
+
+@Composable
+private fun SettingsSwitchRow(
+    icon: ImageVector,
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val c = LocalTgColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = c.icon, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(14.dp))
+        Text(title, color = c.textPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+    }
 }

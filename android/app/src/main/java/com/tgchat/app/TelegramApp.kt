@@ -10,21 +10,31 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -34,11 +44,16 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -52,7 +67,13 @@ import androidx.core.view.WindowCompat
 import com.tgchat.app.ui.screens.AdminScreen
 import com.tgchat.app.ui.LocalReduceMotion
 import com.tgchat.app.ui.rememberReduceMotion
+import com.tgchat.app.data.MessageDto
+import com.tgchat.app.push.AppSettings
+import com.tgchat.app.push.IncomingCenter
+import com.tgchat.app.push.MessageSound
+import com.tgchat.app.ui.components.Avatar
 import com.tgchat.app.ui.screens.NoteDisguiseScreen
+import com.tgchat.app.util.formatMessageTime
 import com.tgchat.app.ui.screens.ChatScreen
 import com.tgchat.app.ui.screens.ChatsScreen
 import com.tgchat.app.ui.screens.LoginScreen
@@ -84,6 +105,27 @@ fun TelegramApp(vm: AppViewModel) {
         val reduceMotion = rememberReduceMotion()
         val view = LocalView.current
         val context = LocalContext.current
+
+        var popupMessage by remember { mutableStateOf<MessageDto?>(null) }
+        var popupVisible by remember { mutableStateOf(false) }
+
+        LaunchedEffect(Unit) {
+            IncomingCenter.events.collect { message ->
+                if (vm.token == null || vm.locked) return@collect
+                if (message.chatId == vm.activeChatId) return@collect
+                if (!AppSettings.popupEnabled(context)) return@collect
+                popupMessage = message
+                popupVisible = true
+                MessageSound.play(context)
+            }
+        }
+
+        LaunchedEffect(popupVisible) {
+            if (popupVisible) {
+                delay(4200)
+                popupVisible = false
+            }
+        }
         val lockedNow = vm.disguiseEnabled && vm.locked
         SideEffect {
             if (!view.isInEditMode) {
@@ -149,6 +191,31 @@ fun TelegramApp(vm: AppViewModel) {
                     }
                 }
 
+                AnimatedVisibility(
+                    visible = popupVisible,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    enter = if (reduceMotion) fadeIn(tween(120))
+                    else slideInVertically(tween(220)) { -it } + fadeIn(tween(180)),
+                    exit = if (reduceMotion) fadeOut(tween(120))
+                    else slideOutVertically(tween(180)) { -it } + fadeOut(tween(140)),
+                ) {
+                    popupMessage?.let { message ->
+                        MessagePopup(
+                            message = message,
+                            title = vm.chats.firstOrNull { it.id == message.chatId }?.title ?: message.senderName,
+                            colorHex = vm.chats.firstOrNull { it.id == message.chatId }?.avatarColor ?: "#3390EC",
+                            onOpen = {
+                                popupVisible = false
+                                vm.openChat(message.chatId)
+                            },
+                            onDismiss = { popupVisible = false },
+                        )
+                    }
+                }
+
                 val toast = vm.toast
                 LaunchedEffect(toast) {
                     if (toast != null) {
@@ -205,6 +272,75 @@ private fun SplashScreen() {
                 modifier = Modifier.size(22.dp),
                 color = Color.White.copy(alpha = 0.85f),
                 strokeWidth = 2.dp,
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun MessagePopup(
+    message: MessageDto,
+    title: String,
+    colorHex: String,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = LocalTgColors.current
+    val preview = when {
+        message.deleted -> "消息已删除"
+        message.poll != null -> "[投票] " + (message.poll?.question ?: "")
+        message.media != null -> when (message.media?.kind) {
+            "image" -> "[图片]"
+            "video", "video_note" -> "[视频]"
+            "voice" -> "[语音]"
+            "sticker" -> "[贴纸]"
+            "gif" -> "[GIF]"
+            else -> "[文件] " + (message.media?.name ?: "")
+        }
+        else -> message.text.replace("\n", " ")
+    }
+
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = c.headerBg),
+        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { _, dragAmount ->
+                    if (dragAmount < -6f) onDismiss()
+                }
+            }
+            .clickable { onOpen() },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Avatar(name = title, colorHex = colorHex, size = 40.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    color = c.textPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = preview,
+                    color = c.textSecondary,
+                    fontSize = 13.sp,
+                    maxLines = 2,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = formatMessageTime(message.createdAt),
+                color = c.textTertiary,
+                fontSize = 11.sp,
             )
         }
     }

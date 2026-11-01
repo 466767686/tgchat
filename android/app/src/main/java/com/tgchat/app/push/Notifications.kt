@@ -8,6 +8,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -16,16 +18,26 @@ import com.tgchat.app.R
 import com.tgchat.app.data.MessageDto
 
 object Notifications {
-    const val CHANNEL_MESSAGES = "tgchat_messages"
+    const val CHANNEL_MESSAGES = "yuejian_messages_v2"
     const val CHANNEL_SERVICE = "tgchat_service"
     private const val SERVICE_ID = 1
 
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val ding = Uri.parse(
+            "android.resource://" + context.packageName + "/" + R.raw.message_ding,
+        )
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_MESSAGES, "应用通知", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "新消息提醒"
+            NotificationChannel(CHANNEL_MESSAGES, "消息提醒", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "新消息横幅与提示音"
                 enableVibration(true)
+                setSound(
+                    ding,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
             },
         )
         manager.createNotificationChannel(
@@ -76,6 +88,7 @@ object Notifications {
             .setAutoCancel(true)
             .setGroup(message.chatId)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setContentIntent(pending)
             .build()
 
