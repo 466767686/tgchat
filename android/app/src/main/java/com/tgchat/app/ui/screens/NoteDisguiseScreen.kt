@@ -364,7 +364,11 @@ private fun PinPad(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.linearGradient(listOf(PinkTop, PinkBottom))),
+            .background(Brush.linearGradient(listOf(PinkTop, PinkBottom)))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { /* swallow taps behind the lock */ },
         contentAlignment = Alignment.Center,
     ) {
         Column(
